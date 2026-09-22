@@ -1,87 +1,110 @@
 #include "kitsugui/panel.h"
 #include "kitsugui/shapes.h"
+#include "kitsugui/theme.h"
 
 namespace KitsuGui {
 
+// ============================================================
+// Constructor / destructor
+// ============================================================
 KitsuPanel::KitsuPanel(bool horizontal)
     : KitsuBox(horizontal) {
-    setAlignment(KitsuAlign::CENTER);
-    setJustify(KitsuJustify::CENTER);
-    padding = 20;
-    spacing = 12;
-    
-    // Inicializar con el tema actual
-    KitsuTheme& t = KitsuTheme::current();
-    bg_color = t.bg_secondary;
-    border_color = t.border;
-    border_thickness = t.border_normal;
-    corner_radius = t.radius_medium;
+    align(KitsuAlign::CENTER);
+    justify(KitsuJustify::CENTER);
+    padding_ = 20;
+    spacing_ = 12;
 }
 
 KitsuPanel::~KitsuPanel() = default;
 
-KitsuPanel& KitsuPanel::withBackground(const Color& c) {
-    bg_color = c;
-    use_theme_bg = false;
-    markDirty();
-    return *this;
+// ============================================================
+// Apariencia
+// ============================================================
+KitsuPanel* KitsuPanel::bg(const Color& c) {
+    bg_ = c;
+    invalidate();
+    return this;
 }
 
-KitsuPanel& KitsuPanel::withBorder(const Color& c, int thickness) {
-    border_color = c;
-    border_thickness = thickness;
-    use_theme_border = false;
-    markDirty();
-    return *this;
+KitsuPanel* KitsuPanel::border_color(const Color& c) {
+    border_ = c;
+    invalidate();
+    return this;
 }
 
-KitsuPanel& KitsuPanel::withCorner(float radius) {
-    corner_radius = radius;
-    use_theme_radius = false;
-    markDirty();
-    return *this;
+KitsuPanel* KitsuPanel::border_width(int thickness) {
+    border_w_ = thickness;
+    invalidate();
+    return this;
 }
 
+KitsuPanel* KitsuPanel::corner(float radius) {
+    corner_ = radius;
+    invalidate();
+    return this;
+}
+
+// ============================================================
+// Overrides fluent
+// ============================================================
+KitsuPanel* KitsuPanel::padding(int p) {
+    KitsuBox::padding(p);
+    return this;
+}
+
+KitsuPanel* KitsuPanel::spacing(int s) {
+    KitsuBox::spacing(s);
+    return this;
+}
+
+KitsuPanel* KitsuPanel::margin(int m) {
+    KitsuBox::margin(m);
+    return this;
+}
+
+// ============================================================
+// Render
+// ============================================================
 void KitsuPanel::render(SDL_Renderer* renderer) {
-    if (!visible) return;
-    
-    SDL_Rect abs = getRenderBounds();
-    
-    // Colores del tema (o custom si el usuario los cambió)
-    KitsuTheme& t = KitsuTheme::current();
-    
-    Color bg = use_theme_bg ? t.bg_secondary : bg_color;
-    Color border = use_theme_border ? t.border : border_color;
-    float radius = use_theme_radius ? t.radius_medium : corner_radius;
-    int thickness = use_theme_border ? t.border_normal : border_thickness;
-    
-    // 1. Fondo redondeado
-    KitsuRect((float)abs.x, (float)abs.y, (float)abs.w, (float)abs.h)
+    if (!visible || !renderer) return;
+
+    SDL_Rect r = visualRect();
+    KitsuTheme& t = KitsuTheme::active();
+
+    // Resolver colores/estilos: tema o custom
+    Color bg     = (bg_.r < 0)     ? t.bg_secondary : bg_;
+    Color border = (border_.r < 0) ? t.border       : border_;
+    int   bw     = (border_w_ < 0) ? t.border_thickness_panel : border_w_;
+    float radius = (corner_ < 0.0f) ? t.radius_panel : corner_;
+
+    // ===== 1. Fondo =====
+    KitsuRect((float)r.x, (float)r.y, (float)r.w, (float)r.h)
         .radius(radius)
         .fill(bg)
         .draw(renderer);
-    
-    // 2. Borde (usando doble rect para bordes limpios)
-    if (thickness > 0) {
-        // Borde exterior
-        KitsuRect((float)abs.x, (float)abs.y, (float)abs.w, (float)abs.h)
+
+    // ===== 2. Borde =====
+    if (bw > 0) {
+        // Borde exterior (color)
+        KitsuRect((float)r.x, (float)r.y, (float)r.w, (float)r.h)
             .radius(radius)
             .fill(border)
             .draw(renderer);
-        
-        // Fondo interior
-        float fth = (float)thickness;
-        KitsuRect((float)abs.x + fth, (float)abs.y + fth,
-                  (float)abs.w - 2*fth, (float)abs.h - 2*fth)
-            .radius(SDL_max(0.0f, radius - fth))
+
+        // Relleno interior (tapa el centro y deja solo el marco)
+        float fw = (float)bw;
+        float inner_r = radius - fw;
+        if (inner_r < 0) inner_r = 0;
+
+        KitsuRect((float)r.x + fw, (float)r.y + fw,
+                  (float)r.w - 2 * fw, (float)r.h - 2 * fw)
+            .radius(inner_r)
             .fill(bg)
             .draw(renderer);
     }
-    
-    // 3. Hijos
+
+    // ===== 3. Hijos =====
     KitsuBox::render(renderer);
-    
-    clearDirty();
 }
 
 } // namespace KitsuGui

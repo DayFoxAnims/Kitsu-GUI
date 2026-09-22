@@ -3,7 +3,6 @@
 
 #include "kitsugui/widget.h"
 #include "kitsugui/color.h"
-#include "kitsugui/shapes.h"
 #include <SDL2/SDL_ttf.h>
 #include <string>
 #include <functional>
@@ -17,66 +16,66 @@ enum class ButtonState {
     DISABLED
 };
 
+// ============================================================
+// KitsuButton
+// ============================================================
+// Uso mínimo:
+//   auto* b = new KitsuButton("Guardar");
+//   b->onClick([]() { ... });
+//
+// Si no le das tamaño, mide el texto automáticamente.
+// ============================================================
 class KitsuButton : public KitsuWidget {
 public:
-    KitsuButton(const std::string& text, int width = 120, int height = 40);
+    explicit KitsuButton(const std::string& text);
+
     ~KitsuButton() override;
-    
-    // Configuración fluida
-    KitsuButton& disabled();
-    KitsuButton& withCallback(std::function<void()> cb);
-    KitsuButton& withTheme(Theme t);
-    KitsuButton& withFont(TTF_Font* font);
-    KitsuButton& withCorner(float radius);
-    
-    KitsuButton& setBounds(int x, int y, int w, int h) {
-        setBoundsInternal(x, y, w, h);
-        return *this;
+
+    // ===== Contenido =====
+    const std::string& text() const { return text_; }
+    KitsuButton* text(const std::string& t);
+
+    // ===== Apariencia =====
+    KitsuButton* font(TTF_Font* f);
+    KitsuButton* corner(float r);
+    KitsuButton* padding(int p);   // override del base
+    KitsuButton* size(int w, int h);
+
+    // ===== Estado =====
+    ButtonState state() const { return state_; }
+    KitsuButton* disable();
+
+    // ===== Callbacks =====
+    KitsuButton* onClick(std::function<void()> cb) {
+        on_click_ = std::move(cb);
+        return this;
     }
-    
-    KitsuButton& setPosition(int x, int y) {
-        bounds.x = x;
-        bounds.y = y;
-        markDirty();
-        return *this;
-    }
-    
-    // Getters
-    ButtonState getState() const { return state; }
-    
-    // Setters
-    void setState(ButtonState s);
-    
-    // Overrides
+
+    // ===== Overrides =====
     void render(SDL_Renderer* renderer) override;
     bool handleEvent(const SDL_Event& e) override;
-    
-    static void setFont(TTF_Font* font);
-    static TTF_Font* getFont();
-    
+
 private:
-    std::string text;
-    ButtonState state = ButtonState::NORMAL;
-    Theme theme = Theme::LIGHT;
-    std::function<void()> callback;
-    bool mouse_inside = false;
-    TTF_Font* font = nullptr;
-    float corner_radius = KitsuStyle::ButtonRadius;
-    
-    SDL_Texture* text_texture = nullptr;
-    int cached_text_r = -1;
-    int cached_text_g = -1;
-    int cached_text_b = -1;
-    std::string cached_text;
-    TTF_Font* cached_font = nullptr;
-    
-    static TTF_Font* g_font;
-    
-    TTF_Font* getActiveFont() const { return font ? font : g_font; }
-    void getColorsForState(Uint8& r, Uint8& g, Uint8& b,
-                          Uint8& br, Uint8& bg, Uint8& bb,
-                          Uint8& tr, Uint8& tg, Uint8& tb) const;
-    void updateTextTexture(SDL_Renderer* renderer, Uint8 r, Uint8 g, Uint8 b);
+    std::string text_;
+    ButtonState state_ = ButtonState::NORMAL;
+    std::function<void()> on_click_;
+    bool mouse_inside_ = false;
+
+    TTF_Font* font_ = nullptr;
+    float corner_ = -1.0f;   // -1 = usar el del tema
+
+    // Caché de textura
+    SDL_Texture* text_texture_ = nullptr;
+    int tex_w_ = 0, tex_h_ = 0;
+    std::string cached_text_;
+    TTF_Font* cached_font_ = nullptr;
+    Uint8 cached_r_ = 0, cached_g_ = 0, cached_b_ = 0;
+
+    TTF_Font* activeFont() const;
+    void updateTextTexture(SDL_Renderer* renderer,
+                          Uint8 r, Uint8 g, Uint8 b);
+    void destroyTextTexture();
+    void autoSize();   // mide el texto y ajusta desired_w/h
 };
 
 } // namespace KitsuGui

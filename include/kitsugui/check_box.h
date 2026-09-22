@@ -2,58 +2,74 @@
 #define KITSUGUI_CHECK_BOX_H
 
 #include "kitsugui/widget.h"
-#include "kitsugui/theme.h"
+#include "kitsugui/color.h"
 #include <SDL2/SDL_ttf.h>
 #include <string>
 #include <functional>
 
 namespace KitsuGui {
 
+// ============================================================
+// KitsuCheckBox
+// ============================================================
+// Uso mínimo:
+//   auto* cb = new KitsuCheckBox("Acepto los términos");
+//   cb->onChange([](bool c) { ... });
+//
+// Constructor con texto vacío también vale (checkbox sin label).
+// ============================================================
 class KitsuCheckBox : public KitsuWidget {
 public:
-    KitsuCheckBox(const std::string& text = "", bool checked = false);
+    explicit KitsuCheckBox(const std::string& text = "",
+                          bool checked = false);
     ~KitsuCheckBox() override;
-    
-    KitsuCheckBox& withFont(TTF_Font* font);
-    KitsuCheckBox& withChecked(bool c);
-    KitsuCheckBox& withCallback(std::function<void(bool)> cb);
-    KitsuCheckBox& disabled();
-    KitsuCheckBox& setBounds(int x, int y, int w, int h) {
-        setBoundsInternal(x, y, w, h);
-        return *this;
+
+    // ===== Contenido =====
+    const std::string& text() const { return text_; }
+    KitsuCheckBox* text(const std::string& t);
+
+    // ===== Estado =====
+    bool isChecked() const { return checked_; }
+    KitsuCheckBox* checked(bool c);
+    KitsuCheckBox* toggle();
+    KitsuCheckBox* disable();
+
+    // ===== Apariencia =====
+    KitsuCheckBox* font(TTF_Font* f);
+    KitsuCheckBox* size(int w, int h);
+
+    // ===== Callbacks =====
+    KitsuCheckBox* onChange(std::function<void(bool)> cb) {
+        on_change_ = std::move(cb);
+        return this;
     }
-    
-    bool isChecked() const { return checked; }
-    void setChecked(bool c);
-    void toggle() { setChecked(!checked); }
-    
+
+    // ===== Overrides =====
     void render(SDL_Renderer* renderer) override;
     bool handleEvent(const SDL_Event& e) override;
-    
-    static void setFont(TTF_Font* font) { g_font = font; }
-    static TTF_Font* getFont() { return g_font; }
-    
+
 private:
-    std::string text;
-    bool checked = false;
-    bool mouse_inside = false;
-    bool mouse_down = false;
-    bool enabled_ = true;
-    TTF_Font* font = nullptr;
-    std::function<void(bool)> callback;
-    
-    // Caché
-    SDL_Texture* text_texture = nullptr;
-    int tex_w = 0, tex_h = 0;
-    std::string cached_text;
-    TTF_Font* cached_font = nullptr;
-    Uint8 cached_r = 0, cached_g = 0, cached_b = 0;
-    
-    static TTF_Font* g_font;
-    
-    TTF_Font* getActiveFont() const { return font ? font : g_font; }
-    void updateTextTexture(SDL_Renderer* renderer);
-    void destroyTextTexture();
+    std::string text_;
+    bool checked_ = false;
+    bool mouse_inside_ = false;
+    bool mouse_down_ = false;
+    bool disabled_ = false;
+    bool manual_size_ = false;
+
+    TTF_Font* font_ = nullptr;
+    std::function<void(bool)> on_change_;
+
+    // Caché de textura
+    SDL_Texture* text_texture_ = nullptr;
+    int tex_w_ = 0, tex_h_ = 0;
+    std::string cached_text_;
+    TTF_Font* cached_font_ = nullptr;
+    Uint8 cached_r_ = 0, cached_g_ = 0, cached_b_ = 0;
+
+    TTF_Font* activeFont() const;
+    void destroyTexture();
+    void updateTextTexture(SDL_Renderer* renderer, Color color);
+    void autoSize();
 };
 
 } // namespace KitsuGui

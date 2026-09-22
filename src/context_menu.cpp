@@ -1,116 +1,135 @@
 #include "kitsugui/context_menu.h"
+#include "kitsugui/fonts.h"
 #include "kitsugui/shapes.h"
+#include "kitsugui/theme.h"
 #include "internal.h"
+#include <algorithm>
 
 namespace KitsuGui {
 
 // ============================================================
 // KitsuMenuItem
 // ============================================================
-TTF_Font* KitsuMenuItem::g_font = nullptr;
-
 KitsuMenuItem::KitsuMenuItem(const std::string& text, std::function<void()> cb)
-    : text(text), callback(cb) {
+    : text_(text), callback_(std::move(cb)) {
+    desired_w = 200;
+    desired_h = 32;
     bounds = {0, 0, 200, 32};
-    requested_w = 200;
-    requested_h = 32;
 }
 
 KitsuMenuItem::~KitsuMenuItem() {
-    destroyTextTexture();
+    destroyTexture();
 }
 
-void KitsuMenuItem::destroyTextTexture() {
-    if (text_texture) {
-        SDL_DestroyTexture(text_texture);
-        text_texture = nullptr;
-        tex_w = tex_h = 0;
+KitsuMenuItem* KitsuMenuItem::text(const std::string& t) {
+    if (text_ != t) {
+        text_ = t;
+        invalidate();
     }
+    return this;
 }
 
-void KitsuMenuItem::setText(const std::string& t) {
-    if (text != t) {
-        text = t;
-        markDirty();
+KitsuMenuItem* KitsuMenuItem::item_enabled(bool e) {
+    item_enabled_ = e;
+    invalidate();
+    return this;
+}
+
+KitsuMenuItem* KitsuMenuItem::disable() {
+    return item_enabled(false);
+}
+
+KitsuMenuItem* KitsuMenuItem::separator(bool s) {
+    separator_ = s;
+    invalidate();
+    return this;
+}
+
+void KitsuMenuItem::destroyTexture() {
+    if (text_texture_) {
+        SDL_DestroyTexture(text_texture_);
+        text_texture_ = nullptr;
+        tex_w_ = tex_h_ = 0;
     }
 }
 
 void KitsuMenuItem::updateTextTexture(SDL_Renderer* renderer, Color color) {
-    TTF_Font* active = getActiveFont();
-    if (!active || text.empty() || !renderer) return;
-    
+    TTF_Font* active = KitsuFonts::normal();
+    if (!active || text_.empty() || !renderer) return;
+
     Uint8 r = (Uint8)color.r;
     Uint8 g = (Uint8)color.g;
     Uint8 b = (Uint8)color.b;
-    
-    if (text_texture &&
-        cached_text == text &&
-        cached_font == active &&
-        cached_r == r && cached_g == g && cached_b == b) {
+
+    if (text_texture_ &&
+        cached_text_ == text_ &&
+        cached_font_ == active &&
+        cached_r_ == r && cached_g_ == g && cached_b_ == b) {
         return;
     }
-    
-    destroyTextTexture();
-    
+
+    destroyTexture();
+
     SDL_Color fg = { r, g, b, 255 };
-    SDL_Surface* surface = TTF_RenderUTF8_Blended(active, text.c_str(), fg);
+    SDL_Surface* surface = TTF_RenderUTF8_Blended(active, text_.c_str(), fg);
     if (!surface) return;
-    
-    text_texture = SDL_CreateTextureFromSurface(renderer, surface);
-    tex_w = surface->w;
-    tex_h = surface->h;
+
+    text_texture_ = SDL_CreateTextureFromSurface(renderer, surface);
+    tex_w_ = surface->w;
+    tex_h_ = surface->h;
     SDL_FreeSurface(surface);
-    
-    cached_text = text;
-    cached_font = active;
-    cached_r = r; cached_g = g; cached_b = b;
+
+    cached_text_ = text_;
+    cached_font_ = active;
+    cached_r_ = r;
+    cached_g_ = g;
+    cached_b_ = b;
 }
 
 bool KitsuMenuItem::handleEvent(const SDL_Event& e) {
-    if (!visible || !item_enabled || separator) return false;
-    
-    SDL_Rect abs = getAbsoluteBounds();
-    
+    if (!visible || !item_enabled_ || separator_) return false;
+
+    SDL_Rect r = globalRect();
+
     switch (e.type) {
         case SDL_MOUSEMOTION: {
             int mx = e.motion.x, my = e.motion.y;
-            bool inside = (mx >= abs.x && mx < abs.x + abs.w &&
-                           my >= abs.y && my < abs.y + abs.h);
-            if (inside != mouse_inside) {
-                mouse_inside = inside;
-                markDirty();
+            bool inside = (mx >= r.x && mx < r.x + r.w &&
+                           my >= r.y && my < r.y + r.h);
+            if (inside != mouse_inside_) {
+                mouse_inside_ = inside;
+                invalidate();
             }
             return false;
         }
-        
+
         case SDL_MOUSEBUTTONDOWN: {
             if (e.button.button != SDL_BUTTON_LEFT) break;
             int mx = e.button.x, my = e.button.y;
-            bool inside = (mx >= abs.x && mx < abs.x + abs.w &&
-                           my >= abs.y && my < abs.y + abs.h);
+            bool inside = (mx >= r.x && mx < r.x + r.w &&
+                           my >= r.y && my < r.y + r.h);
             if (inside) {
-                mouse_down = true;
-                markDirty();
+                mouse_down_ = true;
+                invalidate();
                 return true;
             }
             break;
         }
-        
+
         case SDL_MOUSEBUTTONUP: {
             if (e.button.button != SDL_BUTTON_LEFT) break;
             int mx = e.button.x, my = e.button.y;
-            bool inside = (mx >= abs.x && mx < abs.x + abs.w &&
-                           my >= abs.y && my < abs.y + abs.h);
-            
-            bool was_down = mouse_down;
-            mouse_down = false;
-            markDirty();
-            
+            bool inside = (mx >= r.x && mx < r.x + r.w &&
+                           my >= r.y && my < r.y + r.h);
+
+            bool was_down = mouse_down_;
+            mouse_down_ = false;
+            invalidate();
+
             if (was_down && inside) {
-                auto cb = callback;
-                // Cerrar el menú ANTES del callback
-                if (KitsuContextMenu::getActive()) {
-                    KitsuContextMenu::getActive()->hide();
+                auto cb = callback_;
+                if (KitsuContextMenu::active()) {
+                    KitsuContextMenu::active()->hide();
                 }
                 if (cb) cb();
                 return true;
@@ -123,260 +142,241 @@ bool KitsuMenuItem::handleEvent(const SDL_Event& e) {
 
 void KitsuMenuItem::render(SDL_Renderer* renderer) {
     if (!visible || !renderer) return;
-    
-    SDL_Rect abs = getRenderBounds();
-    KitsuTheme& t = KitsuTheme::current();
-    
-    // ===== Separador =====
-    if (separator) {
+
+    SDL_Rect r = visualRect();
+    KitsuTheme& t = KitsuTheme::active();
+
+    // Separador
+    if (separator_) {
         SDL_SetRenderDrawColor(renderer,
-            t.border.r, t.border.g, t.border.b, 255);
-        int y = abs.y + abs.h / 2;
-        SDL_RenderDrawLine(renderer, abs.x + 8, y, abs.x + abs.w - 8, y);
-        clearDirty();
+            (Uint8)t.border.r, (Uint8)t.border.g, (Uint8)t.border.b, 255);
+        int y = r.y + r.h / 2;
+        SDL_RenderDrawLine(renderer, r.x + 8, y, r.x + r.w - 8, y);
+        clearNeedsRender();
         return;
     }
-    
-    // ===== Fondo según estado =====
-    if (item_enabled) {
-        if (mouse_down) {
-            KitsuRect((float)abs.x, (float)abs.y, (float)abs.w, (float)abs.h)
-                .radius(0)
+
+    // Fondo según estado
+    if (item_enabled_) {
+        if (mouse_down_) {
+            KitsuRect((float)r.x, (float)r.y, (float)r.w, (float)r.h)
                 .fill(t.accent_pressed)
                 .draw(renderer);
-        } else if (mouse_inside) {
-            KitsuRect((float)abs.x, (float)abs.y, (float)abs.w, (float)abs.h)
-                .radius(0)
+        } else if (mouse_inside_) {
+            KitsuRect((float)r.x, (float)r.y, (float)r.w, (float)r.h)
                 .fill(t.accent_hover)
                 .draw(renderer);
         }
     }
-    
-    // ===== Texto =====
-    Color text_color;
-    if (!item_enabled) {
-        text_color = t.text_disabled;
-    } else if (mouse_inside || mouse_down) {
-        text_color = t.text_on_accent;
-    } else {
-        text_color = t.text_primary;
+
+    // Texto
+    Color fg;
+    if (!item_enabled_)    fg = t.text_disabled;
+    else if (mouse_inside_ || mouse_down_) fg = t.text_on_accent;
+    else                   fg = t.text_primary;
+
+    updateTextTexture(renderer, fg);
+
+    if (text_texture_) {
+        int tx = r.x + 12;
+        int ty = r.y + (r.h - tex_h_) / 2;
+        SDL_Rect dst = { tx, ty, tex_w_, tex_h_ };
+        SDL_RenderCopy(renderer, text_texture_, nullptr, &dst);
     }
-    
-    updateTextTexture(renderer, text_color);
-    
-    if (text_texture) {
-        int text_x = abs.x + 12;
-        int text_y = abs.y + (abs.h - tex_h) / 2;
-        SDL_Rect text_rect = { text_x, text_y, tex_w, tex_h };
-        SDL_RenderCopy(renderer, text_texture, nullptr, &text_rect);
-    }
-    
-    clearDirty();
+
+    clearNeedsRender();
 }
 
 // ============================================================
 // KitsuContextMenu
 // ============================================================
-KitsuContextMenu* KitsuContextMenu::s_active_menu = nullptr;
+KitsuContextMenu* KitsuContextMenu::s_active_ = nullptr;
 
-KitsuContextMenu::KitsuContextMenu(int width) {
-    menu_width = width;
-    bounds = {0, 0, menu_width, 0};
-    requested_w = menu_width;
-    requested_h = 0;
-    
+KitsuContextMenu::KitsuContextMenu(int width)
+    : menu_width_(width) {
+    bounds = {0, 0, menu_width_, 0};
+    desired_w = menu_width_;
+    desired_h = 0;
+
     visible = false;
-    open = false;
-    parent = nullptr;   // A propósito: coordenadas absolutas
+    open_ = false;
+    parent = nullptr;   // coordenadas globales
 }
 
 KitsuContextMenu::~KitsuContextMenu() {
-    for (auto* item : owned_items) delete item;
-    owned_items.clear();
-    items.clear();
-    
-    if (s_active_menu == this) {
-        s_active_menu = nullptr;
-    }
+    for (auto* i : owned_) delete i;
+    owned_.clear();
+    items_.clear();
+
+    if (s_active_ == this) s_active_ = nullptr;
 }
 
-void KitsuContextMenu::clearItems() {
-    for (auto* item : owned_items) delete item;
-    owned_items.clear();
-    items.clear();
+KitsuContextMenu* KitsuContextMenu::clear() {
+    for (auto* i : owned_) delete i;
+    owned_.clear();
+    items_.clear();
     relayout();
+    return this;
 }
 
 KitsuMenuItem* KitsuContextMenu::addItem(const std::string& text,
-                                         std::function<void()> cb) {
-    auto* item = new KitsuMenuItem(text, cb);
-    item->setSeparator(false);
-    item->parent = this;                    // ← NUEVO
-    items.push_back(item);
-    owned_items.push_back(item);
+                                        std::function<void()> cb) {
+    auto* item = new KitsuMenuItem(text, std::move(cb));
+    item->parent = this;
+    items_.push_back(item);
+    owned_.push_back(item);
     relayout();
     return item;
 }
 
 KitsuMenuItem* KitsuContextMenu::addSeparator() {
     auto* sep = new KitsuMenuItem("", nullptr);
-    sep->setSeparator(true);
-    sep->setEnabled(false);
-    sep->parent = this;                     // ← NUEVO
-    items.push_back(sep);
-    owned_items.push_back(sep);
+    sep->separator(true);
+    sep->item_enabled(false);
+    sep->parent = this;
+    items_.push_back(sep);
+    owned_.push_back(sep);
     relayout();
     return sep;
 }
 
 void KitsuContextMenu::relayout() {
-    int current_y = padding_v;
-    for (auto* item : items) {
-        int h = item->isSeparator() ? separator_height : item_height;
-        item->setBounds(padding_h, current_y,
-                        menu_width - padding_h * 2, h);
+    int current_y = padding_v_;
+    for (auto* item : items_) {
+        int h = item->isSeparator() ? separator_height_ : item_height_;
+        item->place(padding_h_, current_y,
+                    menu_width_ - padding_h_ * 2, h);
         current_y += h;
     }
-    int new_height = current_y + padding_v;
-    setBoundsInternal(bounds.x, bounds.y, menu_width, new_height);   // ← aquí
+    int new_h = current_y + padding_v_;
+    place(bounds.x, bounds.y, menu_width_, new_h);
 }
 
-void KitsuContextMenu::showAt(int x, int y) {
-    if (s_active_menu && s_active_menu != this) {
-        s_active_menu->hide();
+KitsuContextMenu* KitsuContextMenu::showAt(int x, int y) {
+    if (s_active_ && s_active_ != this) {
+        s_active_->hide();
     }
-    
-    setBoundsInternal(x, y, menu_width, bounds.h);   // ← aquí
-    visible = true;
-    open = true;
-    ignore_next_up_ = true;
-    
+
     relayout();
-    setBoundsInternal(x, y, menu_width, bounds.h);   // ← y aquí
-    
-    s_active_menu = this;
-    markDirty();
-    
-    if (g_renderer) g_renderer->markAllDirty();
+    place(x, y, menu_width_, bounds.h);
+    visible = true;
+    open_ = true;
+    ignore_next_up_ = true;
+
+    s_active_ = this;
+    invalidate();
+
+    if (g_renderer) g_renderer->invalidate();
+    return this;
 }
-void KitsuContextMenu::hide() {
-    if (!open && !visible) return;
+
+KitsuContextMenu* KitsuContextMenu::hide() {
+    if (!open_ && !visible) return this;
+
     visible = false;
-    open = false;
+    open_ = false;
     ignore_next_up_ = false;
-    
-    // Limpiar estados de hover/down de los items
-    for (auto* item : items) {
-        item->markDirty();
-    }
-    
-    if (s_active_menu == this) {
-        s_active_menu = nullptr;
-    }
-    markDirty();
-    if (g_renderer) g_renderer->markAllDirty();
+
+    for (auto* item : items_) item->invalidate();
+
+    if (s_active_ == this) s_active_ = nullptr;
+    invalidate();
+    if (g_renderer) g_renderer->invalidate();
+    return this;
 }
 
 void KitsuContextMenu::render(SDL_Renderer* renderer) {
     if (!visible || !renderer) return;
-    
-    SDL_Rect abs = getRenderBounds();
-    KitsuTheme& t = KitsuTheme::current();
-    
-    // ===== Sombra sutil (offset) =====
+
+    SDL_Rect r = visualRect();
+    KitsuTheme& t = KitsuTheme::active();
+
+    // Sombra
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 40);
-    SDL_Rect shadow = { abs.x + 2, abs.y + 2, abs.w, abs.h };
+    SDL_Rect shadow = { r.x + 2, r.y + 2, r.w, r.h };
     SDL_RenderFillRect(renderer, &shadow);
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
-    
-    // ===== Fondo =====
-    KitsuRect((float)abs.x, (float)abs.y, (float)abs.w, (float)abs.h)
+
+    // Fondo
+    KitsuRect((float)r.x, (float)r.y, (float)r.w, (float)r.h)
         .radius(t.radius_panel)
         .fill(t.bg_secondary)
         .draw(renderer);
-    
-    // ===== Borde =====
-    KitsuRect((float)abs.x, (float)abs.y, (float)abs.w, (float)abs.h)
+
+    // Borde
+    KitsuRect((float)r.x, (float)r.y, (float)r.w, (float)r.h)
         .radius(t.radius_panel)
         .fill(t.border)
         .drawOutline(renderer, 1.0f);
-    
-    // ===== Items =====
-    for (auto* item : items) {
+
+    // Items
+    for (auto* item : items_) {
         if (item) item->render(renderer);
     }
-    
-    clearDirty();
+
+    clearNeedsRender();
 }
 
 bool KitsuContextMenu::handleEvent(const SDL_Event& e) {
-    if (!open) return false;
-    
-    // ===== Ignorar el MOUSEBUTTONUP del click que abrió el menú =====
+    if (!open_) return false;
+
+    // Ignorar el MOUSEBUTTONUP que abrió el menú
     if (ignore_next_up_) {
         if (e.type == SDL_MOUSEBUTTONUP) {
             ignore_next_up_ = false;
         }
-        return true;   // consumir mientras ignoramos
+        return true;
     }
-    
-    SDL_Rect abs = getAbsoluteBounds();
-    
+
+    SDL_Rect r = globalRect();
+
     switch (e.type) {
-        // ===== ESC → cerrar =====
         case SDL_KEYDOWN: {
             if (e.key.keysym.sym == SDLK_ESCAPE) {
                 hide();
                 return true;
             }
-            return true;   // consumir todo el teclado mientras esté abierto
+            return true;
         }
-        
-        // ===== Click: dentro → items, fuera → cerrar =====
+
         case SDL_MOUSEBUTTONDOWN: {
             int mx = e.button.x, my = e.button.y;
-            bool inside = (mx >= abs.x && mx < abs.x + abs.w &&
-                           my >= abs.y && my < abs.y + abs.h);
-            
+            bool inside = (mx >= r.x && mx < r.x + r.w &&
+                           my >= r.y && my < r.y + r.h);
+
             if (!inside) {
                 hide();
-                return true;   // consumir: que no llegue al root
+                return true;
             }
-            // Dentro: propagar a items (de arriba a abajo)
-            for (auto it = items.rbegin(); it != items.rend(); ++it) {
+            for (auto it = items_.rbegin(); it != items_.rend(); ++it) {
                 if (*it && (*it)->handleEvent(e)) return true;
             }
             return true;
         }
-        
+
         case SDL_MOUSEBUTTONUP: {
             int mx = e.button.x, my = e.button.y;
-            bool inside = (mx >= abs.x && mx < abs.x + abs.w &&
-                           my >= abs.y && my < abs.y + abs.h);
-            
-            if (!inside) {
-                return true;   // consumir sin hacer nada
-            }
-            for (auto it = items.rbegin(); it != items.rend(); ++it) {
+            bool inside = (mx >= r.x && mx < r.x + r.w &&
+                           my >= r.y && my < r.y + r.h);
+
+            if (!inside) return true;
+
+            for (auto it = items_.rbegin(); it != items_.rend(); ++it) {
                 if (*it && (*it)->handleEvent(e)) return true;
             }
             return true;
         }
-        
+
         case SDL_MOUSEMOTION: {
-            for (auto* item : items) {
+            for (auto* item : items_) {
                 if (item) item->handleEvent(e);
             }
             return true;
         }
-        
-        case SDL_MOUSEWHEEL: {
-            return true;   // consumir
-        }
-        
+
         default:
-            return true;   // consumir TODO mientras el menú esté abierto
+            return true;
     }
 }
 

@@ -29,6 +29,11 @@ If that doesn't scare you away, welcome aboard.
 
 ---
 
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
+![C++17](https://img.shields.io/badge/C%2B%2B-17-blue.svg)
+![SDL2](https://img.shields.io/badge/SDL2-2.x-green.svg)
+![Status: pre-alpha](https://img.shields.io/badge/status-pre--alpha-red.svg)
+
 ## What is KitsuGui?
 
 KitsuGui is a lightweight, modular UI library designed for C++
@@ -101,63 +106,7 @@ To build only the library (without examples):
 
 ---
 
-## Quick start
 
-    #include <kitsugui.h>
-    #include <SDL2/SDL_ttf.h>
-
-    using namespace KitsuGui;
-
-    int main() {
-        Window win(800, 600, "My App");
-        win.setBackground(KitsuTheme::current().bg_primary);
-
-        TTF_Init();
-        TTF_Font* font = TTF_OpenFont("DejaVuSans.ttf", 15);
-        KitsuLabel::setDefaultFont(font);
-        KitsuButton::setFont(font);
-
-        auto* panel = new KitsuPanel();
-        panel->setBounds(0, 0, -1, -1);
-        panel->setPadding(40);
-        panel->setSpacing(20);
-        panel->setAlignment(KitsuAlign::CENTER);
-        panel->setJustify(KitsuJustify::CENTER);
-
-        auto* label = new KitsuLabel("Hello, KitsuGui");
-        label->setBounds(0, 0, -1, 30);
-        panel->addChild(label, true);
-
-        win.add(panel);
-        run();
-
-        delete panel;
-        TTF_CloseFont(font);
-        TTF_Quit();
-        return 0;
-    }
-
----
-
-## Documentation
-
-Full documentation lives in [`docs/`](docs/INDEX.md):
-
-- [Getting Started](docs/getting-started.md)
-- [Architecture](docs/architecture.md)
-- [Theming](docs/theming.md)
-- [Core concepts](docs/core/)
-- [Widgets](docs/widgets/)
-
-The docs are written in plain Markdown and are best read with a
-renderer such as `glow` in the terminal, or directly on the
-repository page.
-
-> **Documentation accuracy notice:** the docs were generated with
-> AI assistance and may not always reflect the current state of
-> the code. When in doubt, read the headers in `include/kitsugui/`.
-
----
 
 ## Project structure
 
@@ -213,21 +162,6 @@ help of **DeepSeek**, an AI assistant. This means:
 
 Contributions that fix bugs, tighten the design, or improve the
 documentation are welcome.
-
----
-
-## Contributing
-
-If you want to contribute:
-
-1. Read the source first. The docs help, but they are not the
-   source of truth.
-2. Keep changes focused. Small pull requests are easier to
-   review.
-3. Update the documentation if your change affects the public
-   API. Note that the docs are in Markdown, not Doxygen.
-4. Do not assume stability. If you need a stable foundation for
-   a product, this is not the library for you.
 
 ---
 

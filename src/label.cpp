@@ -1,113 +1,221 @@
 #include "kitsugui/label.h"
+#include "kitsugui/fonts.h"
+#include "kitsugui/theme.h"
+#include "kitsugui/utils.h"
 
 namespace KitsuGui {
 
-TTF_Font* KitsuLabel::g_default_font = nullptr;
-
-void KitsuLabel::setDefaultFont(TTF_Font* font) { g_default_font = font; }
-TTF_Font* KitsuLabel::getDefaultFont() { return g_default_font; }
-
-KitsuLabel::KitsuLabel(const std::string& text, int width, int height)
-    : text(text) {
-    bounds.w = width;
-    bounds.h = height;
-    
-    // Color por defecto: text_primary del tema actual
-    KitsuTheme& t = KitsuTheme::current();
-    color_r = (Uint8)t.text_primary.r;
-    color_g = (Uint8)t.text_primary.g;
-    color_b = (Uint8)t.text_primary.b;
+// ============================================================
+// Constructor / destructor
+// ============================================================
+KitsuLabel::KitsuLabel(const std::string& text)
+    : text_(text) {
+    autoSize();
 }
 
-KitsuLabel::~KitsuLabel() { destroyTexture(); }
+KitsuLabel::~KitsuLabel() {
+    destroyTexture();
+}
 
-void KitsuLabel::destroyTexture() {
-    if (text_texture) {
-        SDL_DestroyTexture(text_texture);
-        text_texture = nullptr;
-        tex_w = tex_h = 0;
+// ============================================================
+// Contenido
+// ============================================================
+KitsuLabel* KitsuLabel::text(const std::string& t) {
+    if (text_ != t) {
+        text_ = t;
+        autoSize();
+        invalidate();
     }
+    return this;
 }
 
-KitsuLabel& KitsuLabel::withFont(TTF_Font* f) { font = f; markDirty(); return *this; }
-KitsuLabel& KitsuLabel::withColor(Uint8 r, Uint8 g, Uint8 b) {
-    color_r = r; color_g = g; color_b = b; markDirty(); return *this;
-}
-KitsuLabel& KitsuLabel::withAlign(TextAlign a) { align = a; markDirty(); return *this; }
-KitsuLabel& KitsuLabel::withVAlign(TextVAlign va) { valign = va; markDirty(); return *this; }
-KitsuLabel& KitsuLabel::withWrap(int max_width) { wrap_width = max_width; markDirty(); return *this; }
-
-void KitsuLabel::setText(const std::string& new_text) {
-    if (text != new_text) {
-        text = new_text;
-        markDirty();
-    }
+// ============================================================
+// Apariencia
+// ============================================================
+KitsuLabel* KitsuLabel::font(TTF_Font* f) {
+    font_ = f;
+    autoSize();
+    invalidate();
+    return this;
 }
 
-void KitsuLabel::updateTextTexture(SDL_Renderer* renderer) {
-    TTF_Font* active = getActiveFont();
-    
-    if (text_texture &&
-        cached_text == text &&
-        cached_r == color_r && cached_g == color_g && cached_b == color_b &&
-        cached_wrap == wrap_width &&
-        cached_font == active) {
+KitsuLabel* KitsuLabel::color(const Color& c) {
+    color_ = c;
+    invalidate();
+    return this;
+}
+
+KitsuLabel* KitsuLabel::color(Uint8 r, Uint8 g, Uint8 b) {
+    color_ = Color(r, g, b);
+    invalidate();
+    return this;
+}
+
+KitsuLabel* KitsuLabel::align(TextAlign a) {
+    align_ = a;
+    invalidate();
+    return this;
+}
+
+KitsuLabel* KitsuLabel::valign(TextVAlign va) {
+    valign_ = va;
+    invalidate();
+    return this;
+}
+
+KitsuLabel* KitsuLabel::wrap(int max_width) {
+    wrap_width_ = max_width;
+    autoSize();
+    invalidate();
+    return this;
+}
+
+KitsuLabel* KitsuLabel::size(int w, int h) {
+    desired_w = w;
+    desired_h = h;
+    bounds.w = w;
+    bounds.h = h;
+    manual_size_ = true;
+    invalidate();
+    return this;
+}
+
+// ============================================================
+// Helpers internos
+// ============================================================
+TTF_Font* KitsuLabel::activeFont() const {
+    return font_ ? font_ : KitsuFonts::normal();
+}
+
+void KitsuLabel::autoSize() {
+    if (manual_size_) return;
+    TTF_Font* f = activeFont();
+    if (!f || text_.empty()) {
+        if (desired_w <= 0) desired_w = 1;
+        if (desired_h <= 0) desired_h = 1;
         return;
     }
-    
-    destroyTexture();
-    if (!active || text.empty() || !renderer) return;
-    
-    SDL_Color fg = {color_r, color_g, color_b, 255};
-    SDL_Surface* surface = nullptr;
-    
-    if (wrap_width > 0) {
-        surface = TTF_RenderUTF8_Blended_Wrapped(active, text.c_str(), fg, wrap_width);
+
+    int tw = 0, th = 0;
+
+    if (wrap_width_ > 0) {
+        // Con wrap: calcular ancho/alto con TTF_SizeUTF8 + wrap manual
+        // (TTF no tiene una función que solo mida con wrap sin renderizar,
+        //  así que estimamos el alto con el número de líneas)
+        Utils::measureText(f, text_, tw, th);
+        tw = wrap_width_;
+        // Estimar número de líneas
+        int line_h = TTF_FontLineSkip(f);
+        // Aproximación: cuántas líneas caben
+        int full_w = Utils::textWidth(f, text_);
+        int lines = (full_w + wrap_width_ - 1) / wrap_width_;
+        if (lines < 1) lines = 1;
+        th = lines * line_h;
     } else {
-        surface = TTF_RenderUTF8_Blended(active, text.c_str(), fg);
+        Utils::measureText(f, text_, tw, th);
     }
-    
-    if (!surface) return;
-    
-    text_texture = SDL_CreateTextureFromSurface(renderer, surface);
-    tex_w = surface->w;
-    tex_h = surface->h;
-    SDL_FreeSurface(surface);
-    
-    cached_text = text;
-    cached_r = color_r; cached_g = color_g; cached_b = color_b;
-    cached_wrap = wrap_width;
-    cached_font = active;
+
+    desired_w = tw;
+    desired_h = th;
+
+    // Solo sobreescribir bounds si el usuario no fijó tamaño manual
+    if (bounds.w <= 0) bounds.w = tw;
+    if (bounds.h <= 0) bounds.h = th;
 }
 
+void KitsuLabel::destroyTexture() {
+    if (text_texture_) {
+        SDL_DestroyTexture(text_texture_);
+        text_texture_ = nullptr;
+        tex_w_ = tex_h_ = 0;
+    }
+}
+
+void KitsuLabel::updateTextTexture(SDL_Renderer* renderer, Color color) {
+    TTF_Font* active = activeFont();
+
+    Uint8 r = (Uint8)color.r;
+    Uint8 g = (Uint8)color.g;
+    Uint8 b = (Uint8)color.b;
+
+    if (text_texture_ &&
+        cached_text_ == text_ &&
+        cached_font_ == active &&
+        cached_r_ == r && cached_g_ == g && cached_b_ == b &&
+        cached_wrap_ == wrap_width_) {
+        return;
+    }
+
+    destroyTexture();
+    if (!active || text_.empty() || !renderer) return;
+
+    SDL_Color fg = { r, g, b, 255 };
+    SDL_Surface* surface = nullptr;
+
+    if (wrap_width_ > 0) {
+        surface = TTF_RenderUTF8_Blended_Wrapped(
+            active, text_.c_str(), fg, wrap_width_);
+    } else {
+        surface = TTF_RenderUTF8_Blended(active, text_.c_str(), fg);
+    }
+
+    if (!surface) return;
+
+    text_texture_ = SDL_CreateTextureFromSurface(renderer, surface);
+    tex_w_ = surface->w;
+    tex_h_ = surface->h;
+    SDL_FreeSurface(surface);
+
+    cached_text_ = text_;
+    cached_font_ = active;
+    cached_r_ = r;
+    cached_g_ = g;
+    cached_b_ = b;
+    cached_wrap_ = wrap_width_;
+}
+
+// ============================================================
+// Render
+// ============================================================
 void KitsuLabel::render(SDL_Renderer* renderer) {
     if (!visible || !renderer) return;
-    
-    updateTextTexture(renderer);
-    if (!text_texture) { clearDirty(); return; }
-    
-    SDL_Rect abs = getRenderBounds();
-    int x = abs.x, y = abs.y;
-    
-    if (bounds.w > 0) {
-        switch (align) {
-            case TextAlign::LEFT:   x = abs.x; break;
-            case TextAlign::CENTER: x = abs.x + (bounds.w - tex_w) / 2; break;
-            case TextAlign::RIGHT:  x = abs.x + bounds.w - tex_w; break;
+
+    // Resolver color
+    Color final_color = color_;
+    if (final_color.r < 0) {
+        final_color = KitsuTheme::active().text_primary;
+    }
+
+    updateTextTexture(renderer, final_color);
+    if (!text_texture_) {
+        clearNeedsRender();
+        return;
+    }
+
+    SDL_Rect r = visualRect();
+
+    int x = r.x;
+    int y = r.y;
+
+    if (r.w > 0) {
+        switch (align_) {
+            case TextAlign::LEFT:   x = r.x; break;
+            case TextAlign::CENTER: x = r.x + (r.w - tex_w_) / 2; break;
+            case TextAlign::RIGHT:  x = r.x + r.w - tex_w_; break;
         }
     }
-    if (bounds.h > 0) {
-        switch (valign) {
-            case TextVAlign::TOP:    y = abs.y; break;
-            case TextVAlign::MIDDLE: y = abs.y + (bounds.h - tex_h) / 2; break;
-            case TextVAlign::BOTTOM: y = abs.y + bounds.h - tex_h; break;
+    if (r.h > 0) {
+        switch (valign_) {
+            case TextVAlign::TOP:    y = r.y; break;
+            case TextVAlign::MIDDLE: y = r.y + (r.h - tex_h_) / 2; break;
+            case TextVAlign::BOTTOM: y = r.y + r.h - tex_h_; break;
         }
     }
-    
-    SDL_Rect dst = {x, y, tex_w, tex_h};
-    SDL_RenderCopy(renderer, text_texture, nullptr, &dst);
-    
-    clearDirty();
+
+    SDL_Rect dst = { x, y, tex_w_, tex_h_ };
+    SDL_RenderCopy(renderer, text_texture_, nullptr, &dst);
+
+    clearNeedsRender();
 }
 
 } // namespace KitsuGui

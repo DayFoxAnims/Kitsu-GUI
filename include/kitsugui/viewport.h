@@ -14,78 +14,92 @@ enum class ViewportScale {
     CENTER
 };
 
+// ============================================================
+// KitsuViewport
+// ============================================================
+// Renderiza a una textura interna, que luego se muestra escalada
+// según el modo. Útil para canvas, juegos embebidos, previews.
+//
+// Uso mínimo:
+//   auto* vp = new KitsuViewport(640, 480);
+//   vp->onRender([](SDL_Renderer* r, int w, int h) {
+//       // dibuja en espacio 640x480
+//   });
+//
+// Con input:
+//   vp->onInput([](SDL_Event& e) -> bool {
+//       // recibe eventos traducidos al viewport
+//       return false;
+//   });
+// ============================================================
 class KitsuViewport : public KitsuWidget {
 public:
-    KitsuViewport(int internal_w = 640, int internal_h = 480);
+    explicit KitsuViewport(int internal_w = 640, int internal_h = 480);
     ~KitsuViewport() override;
-    
-    // ===== Render =====
-    void setRenderCallback(std::function<void(SDL_Renderer*, int, int)> cb);
-    void setTexture(SDL_Texture* tex, bool owns = false);
-    
-    // ===== Input =====
-    // Callback de eventos. Devuelve true si el evento fue consumido.
-    // SOLO se llama si el mouse está dentro del viewport (o si tiene foco para teclado).
-    void setInputCallback(std::function<bool(SDL_Event&)> cb) {
-        input_cb = cb;
-    }
-    
-    bool hasFocus() const { return focused; }
-    void setFocus(bool f);
-    
-    // ===== Configuración fluida =====
-    KitsuViewport& withBackground(const Color& c);
-    KitsuViewport& withBorder(const Color& c, int thickness = 2);
-    KitsuViewport& withCorner(float radius);
-    KitsuViewport& withScaleMode(ViewportScale mode);
-    KitsuViewport& withInternalSize(int w, int h);
-    KitsuViewport& withClearColor(const Color& c);
-    KitsuViewport& withFocusBorder(const Color& c);
-    
-    KitsuViewport& setBounds(int x, int y, int w, int h) {
-        setBoundsInternal(x, y, w, h);
-        return *this;
-    }
-    
-    void resizeInternal(int w, int h);
-    
-    void setAnimated(bool enabled);
-    bool isAnimated() const { return animating; }
-    
-    SDL_Texture* getTargetTexture() const { return target_texture; }
-    int getInternalWidth() const { return internal_w; }
-    int getInternalHeight() const { return internal_h; }
-    
+
+    // ===== Render callback =====
+    KitsuViewport* onRender(std::function<void(SDL_Renderer*, int, int)> cb);
+
+    // ===== Input callback =====
+    KitsuViewport* onInput(std::function<bool(SDL_Event&)> cb);
+
+    // ===== Textura externa =====
+    KitsuViewport* texture(SDL_Texture* tex, bool owns = false);
+
+    // ===== Foco =====
+    bool hasFocus() const { return focused_; }
+    KitsuViewport* focus(bool f);
+
+    // ===== Apariencia =====
+    KitsuViewport* bg(const Color& c);
+    KitsuViewport* border_color(const Color& c, int thickness = 2);
+    KitsuViewport* focus_border(const Color& c);
+    KitsuViewport* corner(float radius);
+    KitsuViewport* scaleMode(ViewportScale mode);
+    KitsuViewport* internalSize(int w, int h);
+    KitsuViewport* clearColor(const Color& c);
+    KitsuViewport* size(int w, int h);
+
+    // ===== Animación =====
+    KitsuViewport* animated(bool enabled);
+    bool isAnimated() const { return animating_; }
+
+    // ===== Acceso =====
+    SDL_Texture* targetTexture() const { return target_texture_; }
+    int internalWidth()  const { return internal_w_; }
+    int internalHeight() const { return internal_h_; }
+
+    // ===== Overrides =====
     void render(SDL_Renderer* renderer) override;
     bool handleEvent(const SDL_Event& e) override;
-    
+
 private:
-    SDL_Texture* target_texture = nullptr;
-    SDL_Texture* external_texture = nullptr;
-    bool owns_external = false;
-    
-    int internal_w = 0;
-    int internal_h = 0;
-    
-    std::function<void(SDL_Renderer*, int, int)> render_cb;
-    std::function<bool(SDL_Event&)> input_cb;
-    
-    ViewportScale scale_mode = ViewportScale::FIT;
-    Color bg_color = {20, 20, 25, 255};
-    Color border_color = {255, 136, 0, 255};
-    Color border_focus_color = {255, 220, 60, 255};   // amarillo al focus
-    Color clear_color = {15, 15, 20, 255};
-    int border_thickness = 2;
-    float corner_radius = 0;
-    
-    bool animating = false;
-    bool focused = false;
-    bool mouse_inside = false;
-    bool mouse_dragging = false;
-    
-    void createTargetTexture(SDL_Renderer* renderer);
+    SDL_Texture* target_texture_ = nullptr;
+    SDL_Texture* external_texture_ = nullptr;
+    bool owns_external_ = false;
+
+    int internal_w_ = 0;
+    int internal_h_ = 0;
+
+    std::function<void(SDL_Renderer*, int, int)> render_cb_;
+    std::function<bool(SDL_Event&)> input_cb_;
+
+    ViewportScale scale_mode_ = ViewportScale::FIT;
+    Color bg_           = Color(-1, -1, -1);
+    Color border_       = Color(-1, -1, -1);
+    Color border_focus_ = Color(-1, -1, -1);
+    Color clear_        = Color(15, 15, 20, 255);
+    int border_thickness_ = 2;
+    float corner_ = -1.0f;
+
+    bool animating_ = false;
+    bool focused_ = false;
+    bool mouse_inside_ = false;
+    bool manual_size_ = false;
+
     void destroyTargetTexture();
-    SDL_Rect computeDestRect(const SDL_Rect& abs) const;
+    void createTargetTexture(SDL_Renderer* renderer);
+    SDL_Rect computeDest(const SDL_Rect& abs) const;
 };
 
 } // namespace KitsuGui

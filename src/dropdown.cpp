@@ -1,291 +1,314 @@
 #include "kitsugui/dropdown.h"
 #include "kitsugui/context_menu.h"
+#include "kitsugui/fonts.h"
 #include "kitsugui/shapes.h"
+#include "kitsugui/theme.h"
 #include "internal.h"
 
 namespace KitsuGui {
 
-TTF_Font* KitsuDropdown::g_font = nullptr;
-
 // ============================================================
-// CONSTRUCTOR / DESTRUCTOR
+// Constructor / destructor
 // ============================================================
 KitsuDropdown::KitsuDropdown(int width) {
+    desired_w = width;
+    desired_h = 36;
     bounds = {0, 0, width, 36};
-    requested_w = width;
-    requested_h = 36;
-    
-    // Crear el menú interno (se llenará cuando se añadan items)
-    menu = new KitsuContextMenu(width);
+
+    menu_ = new KitsuContextMenu(width);
 }
 
 KitsuDropdown::~KitsuDropdown() {
-    destroyTextTexture();
-    if (menu) {
-        delete menu;
-        menu = nullptr;
-    }
-}
-
-void KitsuDropdown::destroyTextTexture() {
-    if (text_texture) {
-        SDL_DestroyTexture(text_texture);
-        text_texture = nullptr;
-        tex_w = tex_h = 0;
+    destroyTexture();
+    if (menu_) {
+        delete menu_;
+        menu_ = nullptr;
     }
 }
 
 // ============================================================
-// CONFIGURACIÓN FLUIDA
+// Opciones
 // ============================================================
-KitsuDropdown& KitsuDropdown::withFont(TTF_Font* f) {
-    font = f;
-    markDirty();
-    return *this;
-}
-
-KitsuDropdown& KitsuDropdown::withPlaceholder(const std::string& text) {
-    placeholder = text;
-    markDirty();
-    return *this;
-}
-
-// ============================================================
-// GESTIÓN DE ITEMS
-// ============================================================
-int KitsuDropdown::addItem(const std::string& text,
-                          std::function<void()> cb) {
+KitsuDropdown* KitsuDropdown::add(const std::string& text,
+                                 std::function<void()> cb) {
     Item item;
     item.text = text;
     item.callback = cb;
-    items.push_back(item);
-    
-    int index = (int)items.size() - 1;
-    
-    // Añadir al menú contextual
-    if (menu) {
-        menu->addItem(text, [this, index, cb]() {
-            this->setSelectedIndex(index);
-            if (cb) cb();
-            this->menu_open = false;
+    items_.push_back(item);
+
+    rebuildMenu();
+    return this;
+}
+
+KitsuDropdown* KitsuDropdown::addItems(const std::vector<std::string>& new_items) {
+    for (const auto& t : new_items) {
+        add(t);
+    }
+    return this;
+}
+
+KitsuDropdown* KitsuDropdown::clear() {
+    items_.clear();
+    selected_index_ = -1;
+    rebuildMenu();
+    invalidate();
+    return this;
+}
+
+// ============================================================
+// Reconstruir menú — arregla el bug #12
+// ============================================================
+void KitsuDropdown::rebuildMenu() {
+    if (!menu_) return;
+
+    // Destruir el viejo y crear uno nuevo
+    delete menu_;
+    menu_ = new KitsuContextMenu(desired_w);
+
+    for (size_t i = 0; i < items_.size(); i++) {
+        int idx = (int)i;
+        std::string text = items_[i].text;
+
+        menu_->addItem(text, [this, idx, text]() {
+            selectedIndex(idx);
+            if (items_[idx].callback) items_[idx].callback();
+            menu_open_ = false;
         });
     }
-    
-    return index;
-}
-
-void KitsuDropdown::addItems(const std::vector<std::string>& new_items) {
-    for (const auto& text : new_items) {
-        addItem(text);
-    }
-}
-
-void KitsuDropdown::clearItems() {
-    items.clear();
-    // No podemos limpiar el menú interno (KitsuContextMenu no tiene clearItems),
-    // así que simplemente reseteamos la selección.
-    // TODO: implementar clearItems en KitsuContextMenu
-    selected_index = -1;
-    markDirty();
 }
 
 // ============================================================
-// SELECCIÓN
+// Selección
 // ============================================================
-std::string KitsuDropdown::getSelectedText() const {
-    if (selected_index < 0 || selected_index >= (int)items.size()) {
+std::string KitsuDropdown::selectedText() const {
+    if (selected_index_ < 0 || selected_index_ >= (int)items_.size()) {
         return "";
     }
-    return items[selected_index].text;
+    return items_[selected_index_].text;
 }
 
-void KitsuDropdown::setSelectedIndex(int index) {
-    if (index < -1 || index >= (int)items.size()) return;
-    if (index == selected_index) return;
-    
-    selected_index = index;
-    markDirty();
-    
-    if (on_change) {
-        on_change(selected_index, getSelectedText());
-    }
+KitsuDropdown* KitsuDropdown::selectedIndex(int index) {
+    if (index < -1 || index >= (int)items_.size()) return this;
+    if (index == selected_index_) return this;
+
+    selected_index_ = index;
+    invalidate();
+
+    if (on_change_) on_change_(selected_index_, selectedText());
+    return this;
 }
 
-void KitsuDropdown::setSelectedText(const std::string& text) {
-    for (int i = 0; i < (int)items.size(); i++) {
-        if (items[i].text == text) {
-            setSelectedIndex(i);
-            return;
+KitsuDropdown* KitsuDropdown::selectedText(const std::string& text) {
+    for (int i = 0; i < (int)items_.size(); i++) {
+        if (items_[i].text == text) {
+            selectedIndex(i);
+            return this;
         }
     }
+    return this;
 }
 
 // ============================================================
-// TEXTURA DEL TEXTO
+// Apariencia
 // ============================================================
+KitsuDropdown* KitsuDropdown::font(TTF_Font* f) {
+    font_ = f;
+    invalidate();
+    return this;
+}
+
+KitsuDropdown* KitsuDropdown::placeholder(const std::string& text) {
+    placeholder_ = text;
+    invalidate();
+    return this;
+}
+
+KitsuDropdown* KitsuDropdown::size(int w, int h) {
+    desired_w = w;
+    desired_h = h;
+    bounds.w = w;
+    bounds.h = h;
+    manual_size_ = true;
+    if (menu_) {
+        // Recrear el menú con el nuevo ancho
+        rebuildMenu();
+    }
+    invalidate();
+    return this;
+}
+
+// ============================================================
+// Helpers internos
+// ============================================================
+TTF_Font* KitsuDropdown::activeFont() const {
+    return font_ ? font_ : KitsuFonts::normal();
+}
+
+void KitsuDropdown::destroyTexture() {
+    if (text_texture_) {
+        SDL_DestroyTexture(text_texture_);
+        text_texture_ = nullptr;
+        tex_w_ = tex_h_ = 0;
+    }
+}
+
 void KitsuDropdown::updateTextTexture(SDL_Renderer* renderer, Color color) {
-    TTF_Font* active = getActiveFont();
+    TTF_Font* active = activeFont();
     if (!active || !renderer) return;
-    
-    std::string display = getSelectedText();
+
+    std::string display = selectedText();
     bool is_placeholder = false;
-    
+
     if (display.empty()) {
-        display = placeholder;
+        display = placeholder_;
         is_placeholder = true;
     }
-    
+
     Uint8 r = (Uint8)color.r;
     Uint8 g = (Uint8)color.g;
     Uint8 b = (Uint8)color.b;
-    
+
     if (is_placeholder) {
-        KitsuTheme& t = KitsuTheme::current();
+        KitsuTheme& t = KitsuTheme::active();
         r = (Uint8)t.text_secondary.r;
         g = (Uint8)t.text_secondary.g;
         b = (Uint8)t.text_secondary.b;
     }
-    
-    if (text_texture &&
-        cached_text == display &&
-        cached_font == active &&
-        cached_r == r && cached_g == g && cached_b == b) {
+
+    if (text_texture_ &&
+        cached_text_ == display &&
+        cached_font_ == active &&
+        cached_r_ == r && cached_g_ == g && cached_b_ == b) {
         return;
     }
-    
-    destroyTextTexture();
-    
+
+    destroyTexture();
+
     SDL_Color fg = { r, g, b, 255 };
     SDL_Surface* surface = TTF_RenderUTF8_Blended(active, display.c_str(), fg);
     if (!surface) return;
-    
-    text_texture = SDL_CreateTextureFromSurface(renderer, surface);
-    tex_w = surface->w;
-    tex_h = surface->h;
+
+    text_texture_ = SDL_CreateTextureFromSurface(renderer, surface);
+    tex_w_ = surface->w;
+    tex_h_ = surface->h;
     SDL_FreeSurface(surface);
-    
-    cached_text = display;
-    cached_font = active;
-    cached_r = r; cached_g = g; cached_b = b;
+
+    cached_text_ = display;
+    cached_font_ = active;
+    cached_r_ = r;
+    cached_g_ = g;
+    cached_b_ = b;
 }
 
 // ============================================================
-// EVENTOS
+// Eventos
 // ============================================================
 bool KitsuDropdown::handleEvent(const SDL_Event& e) {
     if (!enabled || !visible) return false;
-    
-    SDL_Rect abs = getAbsoluteBounds();
-    
+
+    SDL_Rect r = globalRect();
+
     switch (e.type) {
         case SDL_MOUSEMOTION: {
             int mx = e.motion.x, my = e.motion.y;
-            bool inside = (mx >= abs.x && mx < abs.x + abs.w &&
-                           my >= abs.y && my < abs.y + abs.h);
-            if (inside != mouse_inside) {
-                mouse_inside = inside;
-                markDirty();
-                if (parent) parent->markDirty();
+            bool inside = (mx >= r.x && mx < r.x + r.w &&
+                           my >= r.y && my < r.y + r.h);
+            if (inside != mouse_inside_) {
+                mouse_inside_ = inside;
+                invalidate();
             }
             return false;
         }
-        
+
         case SDL_MOUSEBUTTONDOWN: {
             if (e.button.button != SDL_BUTTON_LEFT) break;
             int mx = e.button.x, my = e.button.y;
-            bool inside = (mx >= abs.x && mx < abs.x + abs.w &&
-                           my >= abs.y && my < abs.y + abs.h);
-            
-            if (inside && menu) {
-                menu_open = true;
-                int menu_x = abs.x;
-                int menu_y = abs.y + abs.h;
-                menu->showAt(menu_x, menu_y);
-                markDirty();
+            bool inside = (mx >= r.x && mx < r.x + r.w &&
+                           my >= r.y && my < r.y + r.h);
+
+            if (inside && menu_) {
+                menu_open_ = true;
+                menu_->showAt(r.x, r.y + r.h);
+                invalidate();
                 return true;
             }
             break;
         }
     }
-    
+
     return false;
 }
+
+// ============================================================
+// Tick
+// ============================================================
 void KitsuDropdown::tick() {
-    // Si el menú se cerró externamente, actualizar el estado
-    if (menu_open && menu && !menu->isOpen()) {
-        menu_open = false;
-        markDirty();
+    // Sincronizar el estado si el menú se cerró externamente
+    if (menu_open_ && menu_ && !menu_->isOpen()) {
+        menu_open_ = false;
+        invalidate();
     }
 }
 
 // ============================================================
-// RENDER
+// Render
 // ============================================================
 void KitsuDropdown::render(SDL_Renderer* renderer) {
     if (!visible || !renderer) return;
-    
-    SDL_Rect abs = getRenderBounds();
-    KitsuTheme& t = KitsuTheme::current();
-    
-    // ===== Colores según estado =====
-    Color bg_color = t.bg_tertiary;
-    Color border_color = t.border;
-    Color text_color = t.text_primary;
-    
-    if (!enabled) {
-        bg_color = t.bg_disabled;
-        border_color = t.border_disabled;
-        text_color = t.text_disabled;
-    } else if (menu_open) {
-        border_color = t.border_focus;
-    } else if (mouse_inside) {
-        border_color = t.accent;
-    }
-    
+
+    SDL_Rect r = visualRect();
+    KitsuTheme& t = KitsuTheme::active();
+
+    Color bg     = enabled ? t.bg_tertiary : t.bg_disabled;
+    Color border = !enabled ? t.border_disabled :
+                   menu_open_ ? t.border_focus :
+                   mouse_inside_ ? t.accent : t.border;
+    Color fg     = enabled ? t.text_primary : t.text_disabled;
+
     // ===== 1. Fondo =====
-    KitsuRect((float)abs.x, (float)abs.y, (float)abs.w, (float)abs.h)
+    KitsuRect((float)r.x, (float)r.y, (float)r.w, (float)r.h)
         .radius(t.radius_button)
-        .fill(bg_color)
+        .fill(bg)
         .draw(renderer);
-    
+
     // ===== 2. Borde =====
-    KitsuRect((float)abs.x, (float)abs.y, (float)abs.w, (float)abs.h)
+    KitsuRect((float)r.x, (float)r.y, (float)r.w, (float)r.h)
         .radius(t.radius_button)
-        .fill(border_color)
+        .fill(border)
         .drawOutline(renderer, (float)t.border_thickness_button);
-    
+
     // ===== 3. Texto =====
-    updateTextTexture(renderer, text_color);
-    if (text_texture && tex_w > 0) {
-        int text_x = abs.x + 12;
-        int text_y = abs.y + (abs.h - tex_h) / 2;
-        
-        int max_text_w = abs.w - 40;
-        if (tex_w > max_text_w) {
-            SDL_Rect src = { 0, 0, max_text_w, tex_h };
-            SDL_Rect dst = { text_x, text_y, max_text_w, tex_h };
-            SDL_RenderCopy(renderer, text_texture, &src, &dst);
+    updateTextTexture(renderer, fg);
+    if (text_texture_ && tex_w_ > 0) {
+        int tx = r.x + 12;
+        int ty = r.y + (r.h - tex_h_) / 2;
+
+        int max_text_w = r.w - 40;
+        if (tex_w_ > max_text_w) {
+            SDL_Rect src = { 0, 0, max_text_w, tex_h_ };
+            SDL_Rect dst = { tx, ty, max_text_w, tex_h_ };
+            SDL_RenderCopy(renderer, text_texture_, &src, &dst);
         } else {
-            SDL_Rect dst = { text_x, text_y, tex_w, tex_h };
-            SDL_RenderCopy(renderer, text_texture, nullptr, &dst);
+            SDL_Rect dst = { tx, ty, tex_w_, tex_h_ };
+            SDL_RenderCopy(renderer, text_texture_, nullptr, &dst);
         }
     }
-    
+
     // ===== 4. Flecha ▼ =====
+    int arrow_x = r.x + r.w - 20;
+    int arrow_y = r.y + r.h / 2 - 4;
     int arrow_size = 8;
-    int arrow_x = abs.x + abs.w - 20;
-    int arrow_y = abs.y + abs.h / 2 - 4;
-    
+
     SDL_SetRenderDrawColor(renderer,
-        (Uint8)border_color.r, (Uint8)border_color.g, (Uint8)border_color.b, 255);
-    
+        (Uint8)border.r, (Uint8)border.g, (Uint8)border.b, 255);
+
     for (int i = 0; i < arrow_size; i++) {
         SDL_RenderDrawLine(renderer,
             arrow_x + i, arrow_y + i,
             arrow_x + arrow_size * 2 - i, arrow_y + i);
     }
-    
-    clearDirty();
+
+    clearNeedsRender();
 }
 
 } // namespace KitsuGui

@@ -87,4 +87,4 @@ trust.
 
 By contributing, you agree that your contributions will be
 licensed under the MIT License, the same as the rest of the
-project.
+project

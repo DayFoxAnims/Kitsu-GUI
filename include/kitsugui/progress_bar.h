@@ -9,75 +9,90 @@
 namespace KitsuGui {
 
 enum class ProgressMode {
-    DETERMINATE,     // barra normal, 0..1
-    INDETERMINATE    // loop animado, sin valor
+    DETERMINATE,     // 0.0 a 1.0
+    INDETERMINATE    // loop animado
 };
 
 enum class ProgressTextPosition {
-    NONE,      // sin texto
-    INSIDE,    // texto dentro de la barra, centrado
-    ABOVE,     // texto encima
-    BELOW,     // texto debajo
-    RIGHT      // texto a la derecha
+    NONE,
+    INSIDE,
+    ABOVE,
+    BELOW,
+    RIGHT
 };
 
+// ============================================================
+// KitsuProgressBar
+// ============================================================
+// Uso mínimo:
+//   auto* pb = new KitsuProgressBar();
+//   pb->value(0.42f);
+//
+// Modo indeterminado:
+//   auto* pb = new KitsuProgressBar();
+//   pb->mode(ProgressMode::INDETERMINATE);
+//
+// Encadenable:
+//   pb->value(0.5f).showText(true).suffix("%");
+// ============================================================
 class KitsuProgressBar : public KitsuWidget {
 public:
     KitsuProgressBar();
     ~KitsuProgressBar() override;
-    
-    // Configuración fluida
-    KitsuProgressBar& withMode(ProgressMode m);
-    KitsuProgressBar& withValue(float v);           // 0.0 a 1.0
-    KitsuProgressBar& withValue(float v, float max); // v de 0 a max
-    KitsuProgressBar& withTextPosition(ProgressTextPosition p);
-    KitsuProgressBar& withTextColor(const Color& c);       // color sobre el track vacío
-    KitsuProgressBar& withFillTextColor(const Color& c);   // color sobre el fill
-    KitsuProgressBar& withTrackColors(const Color& filled, const Color& empty);
-    KitsuProgressBar& withFont(TTF_Font* font);
-    KitsuProgressBar& withHeight(int h);
-    KitsuProgressBar& setBounds(int x, int y, int w, int h);
-    
-    // Estado
-    float getValue() const { return value; }
-    void setValue(float v);
-    
-    // Animación (llamar desde run() o render())
-    void update();   // avanza la animación si está en INDETERMINATE
-    
-    // Overrides
+
+    // ===== Valor =====
+    float value() const { return value_; }
+    KitsuProgressBar* value(float v);
+    KitsuProgressBar* value(float v, float max);
+
+    // ===== Modo =====
+    ProgressMode mode() const { return mode_; }
+    KitsuProgressBar* mode(ProgressMode m);
+    KitsuProgressBar* indeterminate();
+
+    // ===== Apariencia =====
+    KitsuProgressBar* textPosition(ProgressTextPosition p);
+    KitsuProgressBar* showText(bool show);
+    KitsuProgressBar* suffix(const std::string& s);
+    KitsuProgressBar* colors(const Color& filled, const Color& empty);
+    KitsuProgressBar* textColor(const Color& c);
+    KitsuProgressBar* fillTextColor(const Color& c);
+    KitsuProgressBar* font(TTF_Font* f);
+    KitsuProgressBar* height(int h);
+    KitsuProgressBar* size(int w, int h);
+
+    // ===== Overrides =====
     void render(SDL_Renderer* renderer) override;
-    void tick()override;
-    
-    static void setFont(TTF_Font* font) { g_font = font; }
-    static TTF_Font* getFont() { return g_font; }
-    
+    void tick() override;
+
 private:
-    ProgressMode mode = ProgressMode::DETERMINATE;
-    ProgressTextPosition text_position = ProgressTextPosition::INSIDE;
-    
-    float value = 0.0f;        // 0.0 a 1.0
-    float anim_phase = 0.0f;   // para el loop indeterminado
-    Uint32 last_update = 0;
-    
-    TTF_Font* font = nullptr;
-    
-    Color track_filled = Color(255, 136, 0);
-    Color track_empty  = Color(80, 80, 85);
-    Color text_color   = Color(180, 180, 190);   // sobre track vacío
-    Color fill_text_color = Color(255, 255, 255); // sobre fill
-    
-    // Caché de textura del texto
-    SDL_Texture* text_texture = nullptr;
-    int tex_w = 0, tex_h = 0;
-    std::string cached_text;
-    Uint8 cached_r = 0, cached_g = 0, cached_b = 0;
-    
-    static TTF_Font* g_font;
-    
-    TTF_Font* getActiveFont() const { return font ? font : g_font; }
-    void updateTextTexture(SDL_Renderer* renderer, Uint8 r, Uint8 g, Uint8 b);
-    void destroyTextTexture();
+    ProgressMode mode_ = ProgressMode::DETERMINATE;
+    ProgressTextPosition text_position_ = ProgressTextPosition::INSIDE;
+
+    float value_ = 0.0f;         // 0.0 a 1.0
+    float anim_phase_ = 0.0f;    // para INDETERMINATE
+    Uint32 last_update_ = 0;
+
+    TTF_Font* font_ = nullptr;
+    std::string suffix_;
+
+    // -1 = "usar el del tema"
+    Color track_filled_ = Color(-1, -1, -1);
+    Color track_empty_  = Color(-1, -1, -1);
+    Color text_color_   = Color(-1, -1, -1);
+    Color fill_text_color_ = Color(-1, -1, -1);
+
+    bool manual_size_ = false;
+
+    // Caché del texto
+    SDL_Texture* text_texture_ = nullptr;
+    int tex_w_ = 0, tex_h_ = 0;
+    std::string cached_text_;
+    Uint8 cached_r_ = 0, cached_g_ = 0, cached_b_ = 0;
+
+    TTF_Font* activeFont() const;
+    void destroyTexture();
+    void updateTextTexture(SDL_Renderer* renderer, Color color);
     std::string buildText() const;
 };
 

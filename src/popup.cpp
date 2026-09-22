@@ -3,6 +3,7 @@
 #include "kitsugui/label.h"
 #include "kitsugui/text_input.h"
 #include "kitsugui/icon.h"
+#include "kitsugui/theme.h"
 #include "internal.h"
 
 namespace KitsuGui {
@@ -10,45 +11,46 @@ namespace KitsuGui {
 std::vector<KitsuPopup*> g_popups;
 
 // ============================================================
-// CONSTRUCTOR / DESTRUCTOR
+// Constructor / destructor
 // ============================================================
 KitsuPopup::KitsuPopup(int width, int height, const std::string& title)
-    : width(width), height(height) {
-    
-    window = SDL_CreateWindow(
+    : width_(width), height_(height) {
+
+    window_ = SDL_CreateWindow(
         title.c_str(),
-        SDL_WINDOWPOS_CENTERED,
-        SDL_WINDOWPOS_CENTERED,
+        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
         width, height,
         SDL_WINDOW_SHOWN
     );
-    
-    if (!window) {
+
+    if (!window_) {
         SDL_Log("KitsuPopup: error creando ventana: %s", SDL_GetError());
+        open_ = false;
         return;
     }
-    
-    renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
-    if (!renderer) {
+
+    renderer_ = SDL_CreateRenderer(window_, -1, SDL_RENDERER_ACCELERATED);
+    if (!renderer_) {
         SDL_Log("KitsuPopup: error creando renderer: %s", SDL_GetError());
-        SDL_DestroyWindow(window);
-        window = nullptr;
+        SDL_DestroyWindow(window_);
+        window_ = nullptr;
+        open_ = false;
         return;
     }
-    
-    kitsu_renderer = new KitsuRenderer(renderer, width, height);
-    
-    root = new KitsuBox(false);   // vertical
-    root->setBounds(0, 0, width, height);
-    root->setAutoLayout(true);
-    root->setAlignment(KitsuAlign::CENTER);
-    root->setJustify(KitsuJustify::CENTER);
-    root->setSpacing(15);
-    root->setPadding(20);
-    
-    window_id = SDL_GetWindowID(window);
-    open = true;
-    
+
+    krenderer_ = new KitsuRenderer(renderer_, width, height);
+
+    root_ = new KitsuBox(false);
+    root_->place(0, 0, width, height);
+    root_->autoLayout(true);
+    root_->align(KitsuAlign::CENTER);
+    root_->justify(KitsuJustify::CENTER);
+    root_->spacing(15);
+    root_->padding(20);
+
+    window_id_ = SDL_GetWindowID(window_);
+    open_ = true;
+
     g_popups.push_back(this);
 }
 
@@ -59,365 +61,320 @@ KitsuPopup::~KitsuPopup() {
             break;
         }
     }
-    
-    for (auto* w : owned_widgets) delete w;
-    owned_widgets.clear();
-    if (root) delete root;
-    if (kitsu_renderer) delete kitsu_renderer;
-    if (renderer) SDL_DestroyRenderer(renderer);
-    if (window) SDL_DestroyWindow(window);
+
+    for (auto* w : owned_widgets_) delete w;
+    owned_widgets_.clear();
+    if (root_)      delete root_;
+    if (krenderer_) delete krenderer_;
+    if (renderer_)  SDL_DestroyRenderer(renderer_);
+    if (window_)    SDL_DestroyWindow(window_);
 }
 
 // ============================================================
-// CONFIGURACIÓN
+// Configuración fluent
 // ============================================================
-KitsuPopup& KitsuPopup::withType(PopupType t) {
-    type = t;
-    return *this;
+KitsuPopup* KitsuPopup::type(PopupType t) {
+    type_ = t;
+    return this;
 }
 
-KitsuPopup& KitsuPopup::withMessage(const std::string& msg) {
+KitsuPopup* KitsuPopup::message(const std::string& msg) {
     auto* label = new KitsuLabel(msg);
-    label->setBounds(0, 0, width - 40, 60);
-    label->withWrap(width - 40);
-    label->withAlign(TextAlign::CENTER);
-    owned_widgets.push_back(label);
-    root->addChild(label, false);
-    return *this;
+    label->wrap(width_ - 40);
+    label->align(TextAlign::CENTER);
+    owned_widgets_.push_back(label);
+    if (root_) root_->add(label, false);
+    return this;
 }
 
-KitsuPopup& KitsuPopup::withModal(bool m) {
-    modal = m;
-    
-    if (modal && window && g_window) {
-        SDL_Window* parent = g_window->getSDLWindow();
-        if (parent) {
-            SDL_SetWindowModalFor(window, parent);
-        }
+KitsuPopup* KitsuPopup::modal(bool m) {
+    modal_ = m;
+    if (modal_ && window_ && g_window) {
+        SDL_Window* parent = g_window->sdlWindow();   // ← fix
+        if (parent) SDL_SetWindowModalFor(window_, parent);
     }
-    
-    return *this;
+    return this;
 }
 
-KitsuPopup& KitsuPopup::withResizable(bool resizable) {
-    if (window) {
-        SDL_SetWindowResizable(window, resizable ? SDL_TRUE : SDL_FALSE);
+KitsuPopup* KitsuPopup::resizable(bool r) {
+    if (window_) {
+        SDL_SetWindowResizable(window_, r ? SDL_TRUE : SDL_FALSE);
     }
-    return *this;
+    return this;
 }
 
-KitsuPopup& KitsuPopup::withCloseOnEscape(bool enabled) {
-    close_on_escape = enabled;
-    return *this;
+KitsuPopup* KitsuPopup::closeOnEscape(bool enabled) {
+    close_on_escape_ = enabled;
+    return this;
 }
 
 // ============================================================
-// WIDGETS
+// Widgets
 // ============================================================
-void KitsuPopup::add(KitsuWidget* widget) {
-    if (!widget) return;
-    root->addChild(widget, false);
-    root->updateLayout();
+KitsuPopup* KitsuPopup::add(KitsuWidget* widget) {
+    if (!widget || !root_) return this;
+    root_->add(widget, false);
+    root_->updateLayout();
+    return this;
 }
 
-void KitsuPopup::addButton(const std::string& text, std::function<void()> cb) {
+KitsuPopup* KitsuPopup::addButton(const std::string& text,
+                                 std::function<void()> cb) {
     auto* btn = new KitsuButton(text);
-    btn->setBounds(0, 0, 120, 40);
-    btn->withCallback(cb);
-    owned_widgets.push_back(btn);
-    root->addChild(btn, false);
+    btn->onClick(std::move(cb));
+    owned_widgets_.push_back(btn);
+    if (root_) root_->add(btn, false);
+    return this;
 }
 
-void KitsuPopup::addLabel(const std::string& text) {
+KitsuPopup* KitsuPopup::addLabel(const std::string& text) {
     auto* lbl = new KitsuLabel(text);
-    lbl->setBounds(0, 0, width - 40, 30);
-    lbl->withAlign(TextAlign::CENTER);
-    owned_widgets.push_back(lbl);
-    root->addChild(lbl, false);
+    lbl->align(TextAlign::CENTER);
+    owned_widgets_.push_back(lbl);
+    if (root_) root_->add(lbl, false);
+    return this;
 }
 
 // ============================================================
-// CICLO DE VIDA
+// Ciclo de vida
 // ============================================================
-void KitsuPopup::show() {
-    if (window) {
-        SDL_ShowWindow(window);
-        SDL_RaiseWindow(window);
-        open = true;
-        markAllDirty();
+KitsuPopup* KitsuPopup::show() {
+    if (window_) {
+        SDL_ShowWindow(window_);
+        SDL_RaiseWindow(window_);
+        open_ = true;
+        if (krenderer_) krenderer_->invalidate();
     }
+    return this;
 }
 
-void KitsuPopup::hide() {
-    if (window) {
-        SDL_HideWindow(window);
-    }
+KitsuPopup* KitsuPopup::hide() {
+    if (window_) SDL_HideWindow(window_);
+    return this;
 }
 
-void KitsuPopup::close() {
-    open = false;
-    if (on_close) on_close();
+KitsuPopup* KitsuPopup::close() {
+    open_ = false;
+    if (on_close_) on_close_();
+    return this;
 }
 
 // ============================================================
-// RENDER
+// Callbacks
 // ============================================================
+KitsuPopup* KitsuPopup::onClose(std::function<void()> cb) {
+    on_close_ = std::move(cb);
+    return this;
+}
+
+KitsuPopup* KitsuPopup::onResult(std::function<void(int)> cb) {
+    on_result_ = std::move(cb);
+    return this;
+}
+
+// ============================================================
+// Layout / render
+// ============================================================
+void KitsuPopup::updateLayout() {
+    if (!root_) return;
+    root_->place(0, 0, width_, height_);
+    root_->updateLayout();
+}
+
 void KitsuPopup::render() {
-    if (!window || !renderer || !kitsu_renderer) return;
-    if (!open) return;
-    
-    root->setBounds(0, 0, width, height);
-    root->updateLayout();
-    
-    kitsu_renderer->beginFrame();
-    
-    KitsuTheme& t = KitsuTheme::current();
-    SDL_SetRenderDrawColor(renderer,
-        (Uint8)t.bg_primary.r, (Uint8)t.bg_primary.g, (Uint8)t.bg_primary.b, 255);
-    SDL_RenderClear(renderer);
-    
-    root->render(renderer);
-    
-    kitsu_renderer->endFrame();
+    if (!window_ || !renderer_ || !krenderer_) return;
+    if (!open_) return;
+
+    updateLayout();
+
+    krenderer_->begin();
+
+    KitsuTheme& t = KitsuTheme::active();
+    SDL_SetRenderDrawColor(renderer_,
+        (Uint8)t.bg_primary.r, (Uint8)t.bg_primary.g,
+        (Uint8)t.bg_primary.b, 255);
+    SDL_RenderClear(renderer_);
+
+    root_->render(renderer_);
+
+    krenderer_->end();
 }
 
 // ============================================================
-// EVENTOS
+// Eventos
 // ============================================================
 void KitsuPopup::handleEvent(const SDL_Event& e) {
-    if (!open || !window) return;
-    
-    // Window events (cerrar, resize)
+    if (!open_ || !window_) return;
+
     if (e.type == SDL_WINDOWEVENT) {
-        if (e.window.windowID != window_id) return;
-        
+        if (e.window.windowID != window_id_) return;
+
         if (e.window.event == SDL_WINDOWEVENT_CLOSE) {
             close();
             return;
         }
-        
+
         if (e.window.event == SDL_WINDOWEVENT_RESIZED) {
-            int w = e.window.data1;
-            int h = e.window.data2;
-            width = w;
-            height = h;
-            if (kitsu_renderer) kitsu_renderer->resize(w, h);
-            root->setBounds(0, 0, w, h);
-            root->updateLayout();
+            width_ = e.window.data1;
+            height_ = e.window.data2;
+            if (krenderer_) krenderer_->resize(width_, height_);
+            if (root_) root_->place(0, 0, width_, height_);
+            updateLayout();
         }
         return;
     }
-    
-    // Mouse: solo si esta ventana tiene el foco del ratón
+
     if (e.type == SDL_MOUSEBUTTONDOWN || e.type == SDL_MOUSEBUTTONUP ||
         e.type == SDL_MOUSEMOTION || e.type == SDL_MOUSEWHEEL) {
         SDL_Window* focused = SDL_GetMouseFocus();
         if (!focused) return;
-        if (SDL_GetWindowID(focused) != window_id) return;
+        if (SDL_GetWindowID(focused) != window_id_) return;
     }
-    
-    // Teclado: solo si esta ventana tiene el foco del teclado
+
     if (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP || e.type == SDL_TEXTINPUT) {
-        SDL_Window* kb_focus = SDL_GetKeyboardFocus();
-        if (!kb_focus) return;
-        if (SDL_GetWindowID(kb_focus) != window_id) return;
+        SDL_Window* kb = SDL_GetKeyboardFocus();
+        if (!kb) return;
+        if (SDL_GetWindowID(kb) != window_id_) return;
     }
-    
-    // ESC para cerrar
-    if (e.type == SDL_KEYDOWN && close_on_escape) {
+
+    if (e.type == SDL_KEYDOWN && close_on_escape_) {
         if (e.key.keysym.sym == SDLK_ESCAPE) {
             close();
             return;
         }
     }
-    
-    root->handleEvent(e);
+
+    if (root_) root_->handleEvent(e);
 }
 
 void KitsuPopup::tick() {
-    if (!open) return;
-    root->tick();
-}
-
-void KitsuPopup::updateLayout() {
-    if (!root) return;
-    root->setBounds(0, 0, width, height);
-    root->updateLayout();
-}
-
-void KitsuPopup::markAllDirty() {
-    if (kitsu_renderer) kitsu_renderer->markAllDirty();
+    if (!open_) return;
+    if (root_) root_->tick();
 }
 
 // ============================================================
-// HELPERS PARA POPUPS COMUNES
+// Helpers Popup::
 // ============================================================
 namespace Popup {
 
-// ============================================================
-// BÁSICOS
-// ============================================================
 KitsuPopup* message(const std::string& title, const std::string& msg) {
-    auto* popup = new KitsuPopup(400, 200, title);
-    popup->withType(PopupType::MESSAGE);
-    popup->withModal(true);
-    popup->withMessage(msg);
-    popup->addButton("OK", [popup]() {
-        popup->close();
-    });
-    popup->updateLayout();
-    return popup;
+    auto* p = new KitsuPopup(400, 200, title);
+    p->type(PopupType::MESSAGE)->modal(true)->message(msg);
+    p->addButton("OK", [p]() { p->close(); });
+    p->updateLayout();
+    return p;
 }
 
 KitsuPopup* confirm(const std::string& title, const std::string& msg,
                    std::function<void(bool)> cb) {
-    auto* popup = new KitsuPopup(400, 220, title);
-    popup->withType(PopupType::CONFIRM);
-    popup->withModal(true);
-    popup->withMessage(msg);
-    
-    // HBox para los botones (lado a lado)
-    auto* buttons = new KitsuHBox();
-    buttons->setBounds(0, 0, 300, 45);
-    buttons->setSpacing(10);
-    buttons->setPadding(0);
-    buttons->setAlignment(KitsuAlign::CENTER);
-    buttons->setJustify(KitsuJustify::CENTER);
-    buttons->setAutoLayout(true);
-    
-    auto* btn_yes = new KitsuButton("Sí");
-    btn_yes->setBounds(0, 0, 120, 40);
-    btn_yes->withCallback([popup, cb]() {
+    auto* p = new KitsuPopup(400, 220, title);
+    p->type(PopupType::CONFIRM)->modal(true)->message(msg);
+
+    auto* row = new KitsuHBox();
+    row->spacing(10)->padding(0);
+    row->align(KitsuAlign::CENTER);
+    row->justify(KitsuJustify::CENTER);
+
+    auto* yes = new KitsuButton("Sí");
+    yes->onClick([p, cb]() {
         if (cb) cb(true);
-        popup->close();
+        p->close();
     });
-    buttons->addChild(btn_yes, true);
-    
-    auto* btn_no = new KitsuButton("No");
-    btn_no->setBounds(0, 0, 120, 40);
-    btn_no->withCallback([popup, cb]() {
+    row->add(yes, true);
+
+    auto* no = new KitsuButton("No");
+    no->onClick([p, cb]() {
         if (cb) cb(false);
-        popup->close();
+        p->close();
     });
-    buttons->addChild(btn_no, true);
-    
-    popup->add(buttons);
-    popup->updateLayout();
-    return popup;
+    row->add(no, true);
+
+    p->add(row);
+    p->updateLayout();
+    return p;
 }
 
 KitsuPopup* input(const std::string& title, const std::string& msg,
                  std::function<void(const std::string&)> cb) {
-    auto* popup = new KitsuPopup(420, 260, title);
-    popup->withType(PopupType::INPUT);
-    popup->withModal(true);
-    popup->withMessage(msg);
-    
-    auto* ti = new KitsuTextInput("");
-    ti->setBounds(0, 0, 380, 32);
-    ti->withPlaceholder("Escribe aquí...");
-    popup->add(ti);
-    
-    // Botones lado a lado
-    auto* buttons = new KitsuHBox();
-    buttons->setBounds(0, 0, 300, 45);
-    buttons->setSpacing(10);
-    buttons->setPadding(0);
-    buttons->setAlignment(KitsuAlign::CENTER);
-    buttons->setJustify(KitsuJustify::CENTER);
-    buttons->setAutoLayout(true);
-    
-    auto* btn_ok = new KitsuButton("OK");
-    btn_ok->setBounds(0, 0, 120, 40);
-    btn_ok->withCallback([popup, ti, cb]() {
-        if (cb) cb(ti->getText());
-        popup->close();
-    });
-    buttons->addChild(btn_ok, true);
-    
-    auto* btn_cancel = new KitsuButton("Cancelar");
-    btn_cancel->setBounds(0, 0, 120, 40);
-    btn_cancel->withCallback([popup]() {
-        popup->close();
-    });
-    buttons->addChild(btn_cancel, true);
-    
-    popup->add(buttons);
-    popup->updateLayout();
-    return popup;
-}
+    auto* p = new KitsuPopup(420, 260, title);
+    p->type(PopupType::INPUT)->modal(true)->message(msg);
 
-// ============================================================
-// POPUPS CON ICONO
-// ============================================================
+    auto* ti = new KitsuTextInput();
+    ti->placeholder("Escribe aquí...");
+    ti->size(380, 32);
+    p->add(ti);
 
-// Helper interno: crea un popup con icono + mensaje + botón OK
-static KitsuPopup* createIconPopup(const std::string& title,
-                                   const std::string& msg,
-                                   const std::string& icon_name) {
-    auto* popup = new KitsuPopup(460, 220, title);
-    popup->withType(PopupType::MESSAGE);
-    popup->withModal(true);
-    
-    // ===== Fila superior: icono + mensaje =====
     auto* row = new KitsuHBox();
-    row->setBounds(0, 0, 420, 100);
-    row->setSpacing(15);
-    row->setPadding(0);
-    row->setAlignment(KitsuAlign::CENTER);   // centrado vertical
-    row->setJustify(KitsuJustify::START);
-    row->setAutoLayout(true);
-    
-    // Icono del sistema (tamaño fijo 48x48)
-    auto* icon = new KitsuIconView(icon_name, 48, IconSource::SYSTEM_THEME);
-    row->addChild(icon, true);
-    
-    // Label con el mensaje
-    int label_width = 420 - 48 - 15;   // total - icono - spacing
-    auto* label = new KitsuLabel(msg);
-    label->setBounds(0, 0, label_width, 100);
-    label->withWrap(label_width);
-    label->withAlign(TextAlign::LEFT);
-    label->withVAlign(TextVAlign::MIDDLE);
-    row->addChild(label, true);
-    
-    popup->add(row);
-    
-    // ===== Botón OK abajo =====
-    popup->addButton("OK", [popup]() {
-        popup->close();
+    row->spacing(10)->padding(0);
+    row->align(KitsuAlign::CENTER);
+    row->justify(KitsuJustify::CENTER);
+
+    auto* ok = new KitsuButton("OK");
+    ok->onClick([p, ti, cb]() {
+        if (cb) cb(ti->text());
+        p->close();
     });
-    
-    popup->updateLayout();
-    return popup;
+    row->add(ok, true);
+
+    auto* cancel = new KitsuButton("Cancelar");
+    cancel->onClick([p]() { p->close(); });
+    row->add(cancel, true);
+
+    p->add(row);
+    p->updateLayout();
+    return p;
 }
 
-KitsuPopup* warning(const std::string& title, const std::string& msg) {
-    return createIconPopup(title, msg, "dialog-warning");
+// Helper interno para popups con icono
+static KitsuPopup* icon_popup(const std::string& title,
+                              const std::string& msg,
+                              const std::string& icon_name) {
+    auto* p = new KitsuPopup(460, 220, title);
+    p->type(PopupType::MESSAGE)->modal(true);
+
+    auto* row = new KitsuHBox();
+    row->spacing(15)->padding(0);
+    row->align(KitsuAlign::CENTER);
+    row->justify(KitsuJustify::START);
+
+    auto* icon = new KitsuIconView(icon_name, 48, IconSource::SYSTEM_THEME);
+    row->add(icon, true);
+
+    auto* label = new KitsuLabel(msg);
+    label->align(TextAlign::LEFT);
+    label->valign(TextVAlign::MIDDLE);
+    row->add(label, true);
+
+    p->add(row);
+    p->addButton("OK", [p]() { p->close(); });
+    p->updateLayout();
+    return p;
 }
 
-KitsuPopup* error(const std::string& title, const std::string& msg) {
-    return createIconPopup(title, msg, "dialog-error");
+KitsuPopup* warning(const std::string& t, const std::string& m) {
+    return icon_popup(t, m, "dialog-warning");
 }
 
-KitsuPopup* info(const std::string& title, const std::string& msg) {
-    return createIconPopup(title, msg, "dialog-information");
+KitsuPopup* error(const std::string& t, const std::string& m) {
+    return icon_popup(t, m, "dialog-error");
 }
 
-KitsuPopup* success(const std::string& title, const std::string& msg) {
-    return createIconPopup(title, msg, "dialog-information");
+KitsuPopup* info(const std::string& t, const std::string& m) {
+    return icon_popup(t, m, "dialog-information");
+}
+
+KitsuPopup* success(const std::string& t, const std::string& m) {
+    return icon_popup(t, m, "dialog-information");
 }
 
 } // namespace Popup
 
 // ============================================================
-// MODAL ACTIVO
+// Modal activo
 // ============================================================
-KitsuPopup* getActiveModal() {
+KitsuPopup* activeModal() {
     for (auto* p : g_popups) {
-        if (p && p->isOpen() && p->isModal()) {
-            return p;
-        }
+        if (p && p->isOpen() && p->isModal()) return p;
     }
     return nullptr;
 }

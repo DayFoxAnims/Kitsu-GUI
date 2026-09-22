@@ -1,237 +1,292 @@
 #include "kitsugui/switch.h"
+#include "kitsugui/fonts.h"
 #include "kitsugui/shapes.h"
+#include "kitsugui/theme.h"
+#include "kitsugui/utils.h"
+#include <algorithm>
 
 namespace KitsuGui {
 
-TTF_Font* KitsuSwitch::g_font = nullptr;
-
-// Dimensiones del switch
-static const int SWITCH_W = 44;
-static const int SWITCH_H = 22;
-static const int KNOB_PAD = 3;
-static const int BORDER_THICK = 2;
-
+// ============================================================
+// Constructor / destructor
+// ============================================================
 KitsuSwitch::KitsuSwitch(const std::string& text, bool checked)
-    : text(text), checked(checked) {
-    bounds = {0, 0, 220, SWITCH_H};
-    requested_w = 220;
-    requested_h = SWITCH_H;
+    : text_(text), checked_(checked) {
+    autoSize();
 }
 
 KitsuSwitch::~KitsuSwitch() {
-    destroyTextTexture();
+    destroyTexture();
 }
 
-void KitsuSwitch::destroyTextTexture() {
-    if (text_texture) {
-        SDL_DestroyTexture(text_texture);
-        text_texture = nullptr;
-        tex_w = tex_h = 0;
+// ============================================================
+// Contenido
+// ============================================================
+KitsuSwitch* KitsuSwitch::text(const std::string& t) {
+    if (text_ != t) {
+        text_ = t;
+        autoSize();
+        invalidate();
+    }
+    return this;
+}
+
+// ============================================================
+// Estado
+// ============================================================
+KitsuSwitch* KitsuSwitch::checked(bool c) {
+    if (checked_ != c) {
+        checked_ = c;
+        invalidate();
+        if (on_change_) on_change_(checked_);
+    }
+    return this;
+}
+
+KitsuSwitch* KitsuSwitch::toggle() {
+    return checked(!checked_);
+}
+
+KitsuSwitch* KitsuSwitch::disable() {
+    disabled_ = true;
+    enabled = false;
+    invalidate();
+    return this;
+}
+
+// ============================================================
+// Apariencia
+// ============================================================
+KitsuSwitch* KitsuSwitch::font(TTF_Font* f) {
+    font_ = f;
+    autoSize();
+    invalidate();
+    return this;
+}
+
+KitsuSwitch* KitsuSwitch::size(int w, int h) {
+    desired_w = w;
+    desired_h = h;
+    bounds.w = w;
+    bounds.h = h;
+    manual_size_ = true;
+    invalidate();
+    return this;
+}
+
+// ============================================================
+// Helpers internos
+// ============================================================
+TTF_Font* KitsuSwitch::activeFont() const {
+    return font_ ? font_ : KitsuFonts::normal();
+}
+
+void KitsuSwitch::autoSize() {
+	if (manual_size_) return;
+    KitsuTheme& t = KitsuTheme::active();
+    int sw_w = t.switch_width;
+    int sw_h = t.switch_height;
+
+    if (text_.empty()) {
+        desired_w = sw_w;
+        desired_h = sw_h;
+        return;
+    }
+
+    TTF_Font* f = activeFont();
+    if (!f) {
+        desired_w = sw_w;
+        desired_h = sw_h;
+        return;
+    }
+
+    int tw = 0, th = 0;
+    Utils::measureText(f, text_, tw, th);
+
+    // Layout: [switch] + 10px gap + [texto]
+    desired_w = sw_w + 10 + tw;
+    desired_h = std::max(sw_h, th);
+
+    bounds.w = desired_w;
+    bounds.h = desired_h;
+}
+
+void KitsuSwitch::destroyTexture() {
+    if (text_texture_) {
+        SDL_DestroyTexture(text_texture_);
+        text_texture_ = nullptr;
+        tex_w_ = tex_h_ = 0;
     }
 }
 
-KitsuSwitch& KitsuSwitch::withFont(TTF_Font* f) {
-    font = f;
-    markDirty();
-    return *this;
-}
+void KitsuSwitch::updateTextTexture(SDL_Renderer* renderer, Color color) {
+    TTF_Font* active = activeFont();
+    Uint8 r = (Uint8)color.r;
+    Uint8 g = (Uint8)color.g;
+    Uint8 b = (Uint8)color.b;
 
-KitsuSwitch& KitsuSwitch::withChecked(bool c) {
-    setChecked(c);
-    return *this;
-}
-
-KitsuSwitch& KitsuSwitch::withCallback(std::function<void(bool)> cb) {
-    callback = cb;
-    return *this;
-}
-
-KitsuSwitch& KitsuSwitch::disabled() {
-    enabled_ = false;
-    markDirty();
-    return *this;
-}
-
-void KitsuSwitch::setChecked(bool c) {
-    if (checked != c) {
-        checked = c;
-        markDirty();
-        if (parent) parent->markDirty();
-        if (callback) callback(checked);
+    if (text_texture_ &&
+        cached_text_ == text_ &&
+        cached_font_ == active &&
+        cached_r_ == r && cached_g_ == g && cached_b_ == b) {
+        return;
     }
+
+    destroyTexture();
+    if (!active || text_.empty() || !renderer) return;
+
+    SDL_Color fg = { r, g, b, 255 };
+    SDL_Surface* surface = TTF_RenderUTF8_Blended(active, text_.c_str(), fg);
+    if (!surface) return;
+
+    text_texture_ = SDL_CreateTextureFromSurface(renderer, surface);
+    tex_w_ = surface->w;
+    tex_h_ = surface->h;
+    SDL_FreeSurface(surface);
+
+    cached_text_ = text_;
+    cached_font_ = active;
+    cached_r_ = r;
+    cached_g_ = g;
+    cached_b_ = b;
 }
 
-// ===== EVENTOS =====
+// ============================================================
+// Eventos
+// ============================================================
 bool KitsuSwitch::handleEvent(const SDL_Event& e) {
-    if (!enabled_ || !visible) return false;
-    
-    SDL_Rect abs = getAbsoluteBounds();
-    
+    if (disabled_ || !visible || !enabled) return false;
+
+    SDL_Rect r = globalRect();
+
     switch (e.type) {
         case SDL_MOUSEMOTION: {
             int mx = e.motion.x, my = e.motion.y;
-            bool inside = (mx >= abs.x && mx < abs.x + abs.w &&
-                           my >= abs.y && my < abs.y + abs.h);
-            if (inside != mouse_inside) {
-                mouse_inside = inside;
-                markDirty();
-                if (parent) parent->markDirty();
+            bool inside = (mx >= r.x && mx < r.x + r.w &&
+                           my >= r.y && my < r.y + r.h);
+            if (inside != mouse_inside_) {
+                mouse_inside_ = inside;
+                invalidate();
             }
             return inside;
         }
-        
+
         case SDL_MOUSEBUTTONDOWN: {
             if (e.button.button != SDL_BUTTON_LEFT) break;
             int mx = e.button.x, my = e.button.y;
-            bool inside = (mx >= abs.x && mx < abs.x + abs.w &&
-                           my >= abs.y && my < abs.y + abs.h);
+            bool inside = (mx >= r.x && mx < r.x + r.w &&
+                           my >= r.y && my < r.y + r.h);
             if (inside) {
-                mouse_down = true;
-                markDirty();
-                if (parent) parent->markDirty();
+                mouse_down_ = true;
+                invalidate();
                 return true;
             }
             break;
         }
-        
+
         case SDL_MOUSEBUTTONUP: {
             if (e.button.button != SDL_BUTTON_LEFT) break;
             int mx = e.button.x, my = e.button.y;
-            bool inside = (mx >= abs.x && mx < abs.x + abs.w &&
-                           my >= abs.y && my < abs.y + abs.h);
-            
-            if (mouse_down && inside) {
-                mouse_down = false;
+            bool inside = (mx >= r.x && mx < r.x + r.w &&
+                           my >= r.y && my < r.y + r.h);
+
+            bool was_down = mouse_down_;
+            mouse_down_ = false;
+
+            if (was_down && inside) {
                 toggle();
                 return true;
             }
-            mouse_down = false;
-            markDirty();
-            if (parent) parent->markDirty();
+            invalidate();
             break;
         }
     }
     return false;
 }
 
-// ===== TEXTURA =====
-void KitsuSwitch::updateTextTexture(SDL_Renderer* renderer) {
-    TTF_Font* active = getActiveFont();
-    
-    KitsuTheme& t = KitsuTheme::current();
-    Color text_color;
-    
-    if (!enabled_) {
-        text_color = t.text_disabled;
-    } else if (mouse_inside || mouse_down) {
-        text_color = t.accent;
-    } else {
-        text_color = t.text_primary;
-    }
-    
-    Uint8 r = (Uint8)text_color.r;
-    Uint8 g = (Uint8)text_color.g;
-    Uint8 b = (Uint8)text_color.b;
-    
-    if (text_texture &&
-        cached_text == text &&
-        cached_font == active &&
-        cached_r == r && cached_g == g && cached_b == b) {
-        return;
-    }
-    
-    destroyTextTexture();
-    
-    if (!active || text.empty() || !renderer) return;
-    
-    SDL_Color fg = { r, g, b, 255 };
-    SDL_Surface* surface = TTF_RenderUTF8_Blended(active, text.c_str(), fg);
-    if (!surface) return;
-    
-    text_texture = SDL_CreateTextureFromSurface(renderer, surface);
-    tex_w = surface->w;
-    tex_h = surface->h;
-    SDL_FreeSurface(surface);
-    
-    cached_text = text;
-    cached_font = active;
-    cached_r = r; cached_g = g; cached_b = b;
-}
-
-// ===== RENDER =====
+// ============================================================
+// Render
+// ============================================================
 void KitsuSwitch::render(SDL_Renderer* renderer) {
     if (!visible || !renderer) return;
-    
-    SDL_Rect abs = getRenderBounds();
-    KitsuTheme& t = KitsuTheme::current();
-    
-    // ===== 1. Track =====
-    const int SW_W = t.switch_width;
-    const int SW_H = t.switch_height;
-    
-    int track_y = abs.y + (abs.h - SW_H) / 2;
-    SDL_Rect track = { abs.x, track_y, SW_W, SW_H };
-    
+
+    SDL_Rect r = visualRect();
+    KitsuTheme& t = KitsuTheme::active();
+
+    const int sw_w = t.switch_width;
+    const int sw_h = t.switch_height;
+
+    int track_x = r.x;
+    int track_y = r.y + (r.h - sw_h) / 2;
+
     Color track_border;
     Color track_fill;
     Color knob_color;
-    
-    if (!enabled_) {
+    Color text_color;
+
+    if (disabled_) {
         track_border = t.border_disabled;
-        track_fill = t.bg_disabled;
-        knob_color = t.text_disabled;
-    } else if (checked) {
+        track_fill   = t.bg_disabled;
+        knob_color   = t.text_disabled;
+        text_color   = t.text_disabled;
+    } else if (checked_) {
         track_border = t.accent;
-        track_fill = t.accent;
-        knob_color = t.text_on_accent;
-    } else if (mouse_inside || mouse_down) {
+        track_fill   = t.accent;
+        knob_color   = t.text_on_accent;
+        text_color   = (mouse_inside_ || mouse_down_) ? t.accent : t.text_primary;
+    } else if (mouse_inside_ || mouse_down_) {
         track_border = t.accent;
-        track_fill = t.bg_tertiary;
-        knob_color = t.accent;
+        track_fill   = t.bg_tertiary;
+        knob_color   = t.accent;
+        text_color   = t.accent;
     } else {
         track_border = t.border;
-        track_fill = t.bg_tertiary;
-        knob_color = t.border;
+        track_fill   = t.bg_tertiary;
+        knob_color   = t.border;
+        text_color   = t.text_primary;
     }
-    
-    // Fondo del track
-    KitsuRect((float)track.x, (float)track.y, (float)track.w, (float)track.h)
-        .radius(t.radius_switch)   // ← del tema (0 = cuadrado)
+
+    // ===== 1. Track =====
+    KitsuRect((float)track_x, (float)track_y,
+              (float)sw_w, (float)sw_h)
+        .radius(t.radius_switch)
         .fill(track_fill)
         .draw(renderer);
-    
-    // Borde del track
-    KitsuRect((float)track.x, (float)track.y, (float)track.w, (float)track.h)
+
+    KitsuRect((float)track_x, (float)track_y,
+              (float)sw_w, (float)sw_h)
         .radius(t.radius_switch)
         .fill(track_border)
         .drawOutline(renderer, (float)t.border_thickness_switch);
-    
-    // ===== 2. Knob (rectángulo cuadrado) =====
-    const int KNOB_PAD = t.switch_knob_pad;
-    int knob_w = (SW_W / 2) - 2 * KNOB_PAD;
-    int knob_h = SW_H - 2 * KNOB_PAD;
-    
-    int knob_x = checked 
-        ? track.x + SW_W - knob_w - KNOB_PAD
-        : track.x + KNOB_PAD;
-    int knob_y = track.y + KNOB_PAD;
-    
-    // Knob como rectángulo (cuadrado)
-    KitsuRect((float)knob_x, (float)knob_y, (float)knob_w, (float)knob_h)
-        .radius(t.radius_switch)   // mismo radio que el track
+
+    // ===== 2. Knob =====
+    const int pad = t.switch_knob_pad;
+    int knob_w = (sw_w / 2) - 2 * pad;
+    int knob_h = sw_h - 2 * pad;
+
+    int knob_x = checked_
+        ? track_x + sw_w - knob_w - pad
+        : track_x + pad;
+    int knob_y = track_y + pad;
+
+    KitsuRect((float)knob_x, (float)knob_y,
+              (float)knob_w, (float)knob_h)
+        .radius(t.radius_switch)
         .fill(knob_color)
         .draw(renderer);
-    
+
     // ===== 3. Texto =====
-    updateTextTexture(renderer);
-    if (text_texture && tex_w > 0) {
-        int text_x = track.x + SW_W + 10;
-        int text_y = abs.y + (abs.h - tex_h) / 2;
-        SDL_Rect text_rect = { text_x, text_y, tex_w, tex_h };
-        SDL_RenderCopy(renderer, text_texture, nullptr, &text_rect);
+    if (!text_.empty()) {
+        updateTextTexture(renderer, text_color);
+        if (text_texture_ && tex_w_ > 0) {
+            int tx = track_x + sw_w + 10;
+            int ty = r.y + (r.h - tex_h_) / 2;
+            SDL_Rect dst = { tx, ty, tex_w_, tex_h_ };
+            SDL_RenderCopy(renderer, text_texture_, nullptr, &dst);
+        }
     }
-    
-    clearDirty();
+
+    clearNeedsRender();
 }
 
 } // namespace KitsuGui

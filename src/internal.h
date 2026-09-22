@@ -5,8 +5,8 @@
 
 namespace KitsuGui {
 
-// Referencias globales (singleton por ahora)
-extern Window* g_window;
+// Referencias globales
+extern KitsuWindow*   g_window;
 extern KitsuRenderer* g_renderer;
 
 } // namespace KitsuGui

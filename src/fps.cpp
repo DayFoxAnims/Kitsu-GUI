@@ -1,107 +1,114 @@
 #include "kitsugui/fps.h"
+#include "kitsugui/fonts.h"
 #include <cstdio>
 
 namespace KitsuGui {
 
-TTF_Font* KitsuFPSView::g_font = nullptr;
-KitsuFPSView* KitsuFPSView::s_instance = nullptr;
+KitsuFPSView* KitsuFPSView::s_instance_ = nullptr;
 
+// ============================================================
+// Constructor / destructor
+// ============================================================
 KitsuFPSView::KitsuFPSView() {
+    desired_w = 90;
+    desired_h = 24;
     bounds = {10, 10, 90, 24};
-    requested_w = 90;
-    requested_h = 24;
-    
-    last_second = SDL_GetTicks();
-    s_instance = this;
+    last_second_ = SDL_GetTicks();
+    s_instance_ = this;
 }
 
 KitsuFPSView::~KitsuFPSView() {
-    if (text_texture) SDL_DestroyTexture(text_texture);
-    if (s_instance == this) s_instance = nullptr;
+    if (text_texture_) SDL_DestroyTexture(text_texture_);
+    if (s_instance_ == this) s_instance_ = nullptr;
 }
 
+// ============================================================
+// Medición
+// ============================================================
 void KitsuFPSView::frameRendered() {
-    frame_count++;
+    frame_count_++;
     Uint32 now = SDL_GetTicks();
-    Uint32 elapsed = now - last_second;
-    
+    Uint32 elapsed = now - last_second_;
+
     if (elapsed >= 500) {
-        float fps = frame_count * 1000.0f / (float)elapsed;
-        
-        history[history_idx] = fps;
-        history_idx = (history_idx + 1) % 8;
-        
+        float fps = frame_count_ * 1000.0f / (float)elapsed;
+
+        history_[history_idx_] = fps;
+        history_idx_ = (history_idx_ + 1) % 8;
+
         float sum = 0;
         int count = 0;
         for (int i = 0; i < 8; i++) {
-            if (history[i] > 0) { sum += history[i]; count++; }
+            if (history_[i] > 0) { sum += history_[i]; count++; }
         }
         float avg = (count > 0) ? sum / count : 0;
-        
+
         char buf[32];
         snprintf(buf, sizeof(buf), "%.0f fps", avg);
-        
-        if (cached_text != buf) {
-            cached_text = buf;
-            markDirty();
+
+        if (cached_text_ != buf) {
+            cached_text_ = buf;
+            invalidate();
         }
-        
-        frame_count = 0;
-        last_second = now;
+
+        frame_count_ = 0;
+        last_second_ = now;
     }
 }
 
+// ============================================================
+// Render
+// ============================================================
 void KitsuFPSView::render(SDL_Renderer* renderer) {
     if (!visible || !renderer) return;
-    
-    if (cached_text.empty()) cached_text = "0 fps";
-    
-    // Regenerar textura si el texto cambió
-    if (!text_texture || last_rendered != cached_text) {
-        if (text_texture) {
-            SDL_DestroyTexture(text_texture);
-            text_texture = nullptr;
+
+    if (cached_text_.empty()) cached_text_ = "0 fps";
+
+    if (!text_texture_ || last_rendered_ != cached_text_) {
+        if (text_texture_) {
+            SDL_DestroyTexture(text_texture_);
+            text_texture_ = nullptr;
         }
-        last_rendered = cached_text;
-        
-        if (g_font) {
+        last_rendered_ = cached_text_;
+
+        TTF_Font* font = KitsuFonts::mono();
+        if (font) {
             SDL_Color fg = { 255, 220, 60, 255 };
-            SDL_Surface* surface = TTF_RenderUTF8_Blended(g_font, cached_text.c_str(), fg);
+            SDL_Surface* surface = TTF_RenderUTF8_Blended(
+                font, cached_text_.c_str(), fg);
             if (surface) {
-                text_texture = SDL_CreateTextureFromSurface(renderer, surface);
-                tex_w = surface->w;
-                tex_h = surface->h;
+                text_texture_ = SDL_CreateTextureFromSurface(renderer, surface);
+                tex_w_ = surface->w;
+                tex_h_ = surface->h;
                 SDL_FreeSurface(surface);
-                
-                bounds.w = tex_w + 16;
-                bounds.h = tex_h + 8;
-                requested_w = bounds.w;
-                requested_h = bounds.h;
+
+                desired_w = tex_w_ + 16;
+                desired_h = tex_h_ + 8;
+                bounds.w = desired_w;
+                bounds.h = desired_h;
             }
         }
     }
-    
-    if (!text_texture) {
-        clearDirty();
+
+    if (!text_texture_) {
+        clearNeedsRender();
         return;
     }
-    
-    SDL_Rect abs = getAbsoluteBounds();
-    
-    // Fondo negro semi-transparente
+
+    SDL_Rect r = visualRect();
+
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 180);
-    SDL_RenderFillRect(renderer, &abs);
-    
-    // Texto centrado
+    SDL_RenderFillRect(renderer, &r);
+
     SDL_Rect text_rect = {
-        abs.x + (abs.w - tex_w) / 2,
-        abs.y + (abs.h - tex_h) / 2,
-        tex_w, tex_h
+        r.x + (r.w - tex_w_) / 2,
+        r.y + (r.h - tex_h_) / 2,
+        tex_w_, tex_h_
     };
-    SDL_RenderCopy(renderer, text_texture, nullptr, &text_rect);
-    
-    clearDirty();
+    SDL_RenderCopy(renderer, text_texture_, nullptr, &text_rect);
+
+    clearNeedsRender();
 }
 
 } // namespace KitsuGui

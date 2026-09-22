@@ -3,7 +3,6 @@
 
 #include "kitsugui/widget.h"
 #include "kitsugui/color.h"
-#include "kitsugui/theme.h"
 #include <SDL2/SDL_ttf.h>
 #include <string>
 #include <vector>
@@ -11,85 +10,89 @@
 
 namespace KitsuGui {
 
-// Forward declarations
 class KitsuContextMenu;
-class KitsuMenuItem;
 
+// ============================================================
+// KitsuDropdown
+// ============================================================
+// Uso mínimo:
+//   auto* dd = new KitsuDropdown();
+//   dd->placeholder("Selecciona...");
+//   dd->add("Opción 1");
+//   dd->add("Opción 2");
+//   dd->onChange([](int i, const std::string& t) { ... });
+//
+// Fluent:
+//   dd->add("A")->add("B")->add("C");
+// ============================================================
 class KitsuDropdown : public KitsuWidget {
 public:
-    KitsuDropdown(int width = 200);
+    explicit KitsuDropdown(int width = 200);
     ~KitsuDropdown() override;
-    
+
     // ===== Opciones =====
-    int addItem(const std::string& text,
-                std::function<void()> cb = nullptr);
-    void addItems(const std::vector<std::string>& items);
-    void clearItems();
-    
+    KitsuDropdown* add(const std::string& text,
+                      std::function<void()> cb = nullptr);
+    KitsuDropdown* addItems(const std::vector<std::string>& items);
+    KitsuDropdown* clear();
+
     // ===== Selección =====
-    int getSelectedIndex() const { return selected_index; }
-    std::string getSelectedText() const;
-    void setSelectedIndex(int index);
-    void setSelectedText(const std::string& text);
-    
-    // Callback cuando cambia la selección
-    KitsuDropdown& withCallback(std::function<void(int, const std::string&)> cb) {
-        on_change = cb;
-        return *this;
+    int selectedIndex() const { return selected_index_; }
+    std::string selectedText() const;
+    KitsuDropdown* selectedIndex(int i);
+    KitsuDropdown* selectedText(const std::string& text);
+
+    // ===== Apariencia =====
+    KitsuDropdown* font(TTF_Font* f);
+    KitsuDropdown* placeholder(const std::string& text);
+    KitsuDropdown* size(int w, int h);
+
+    // ===== Callbacks =====
+    KitsuDropdown* onChange(std::function<void(int, const std::string&)> cb) {
+        on_change_ = std::move(cb);
+        return this;
     }
-    
-    // ===== Configuración fluida =====
-    KitsuDropdown& withFont(TTF_Font* font);
-    KitsuDropdown& withPlaceholder(const std::string& text);
-    
-    KitsuDropdown& setBounds(int x, int y, int w, int h) {
-        setBoundsInternal(x, y, w, h);
-        return *this;
-    }
-    
+
     // ===== Overrides =====
     void render(SDL_Renderer* renderer) override;
     bool handleEvent(const SDL_Event& e) override;
     void tick() override;
-    
-    static void setFont(TTF_Font* font) { g_font = font; }
-    static TTF_Font* getFont() { return g_font; }
-    
-    // Acceso al menú interno (para registrarlo como overlay)
-    KitsuContextMenu* getMenu() const { return menu; }
-    
+
+    // ===== Acceso =====
+    KitsuContextMenu* menu() const { return menu_; }
+
 private:
-    // ===== Opciones =====
     struct Item {
         std::string text;
         std::function<void()> callback;
     };
-    std::vector<Item> items;
-    
-    int selected_index = -1;
-    std::string placeholder = "Seleccionar...";
-    
-    // ===== Configuración =====
-    TTF_Font* font = nullptr;
-    std::function<void(int, const std::string&)> on_change;
-    bool mouse_inside = false;
-    bool menu_open = false;
-    
-    // ===== Menú interno =====
-    KitsuContextMenu* menu = nullptr;
-    
-    // ===== Caché de textura =====
-    SDL_Texture* text_texture = nullptr;
-    int tex_w = 0, tex_h = 0;
-    std::string cached_text;
-    TTF_Font* cached_font = nullptr;
-    Uint8 cached_r = 0, cached_g = 0, cached_b = 0;
-    
-    static TTF_Font* g_font;
-    
-    TTF_Font* getActiveFont() const { return font ? font : g_font; }
+    std::vector<Item> items_;
+
+    int selected_index_ = -1;
+    std::string placeholder_ = "Seleccionar...";
+
+    TTF_Font* font_ = nullptr;
+    std::function<void(int, const std::string&)> on_change_;
+
+    bool mouse_inside_ = false;
+    bool menu_open_ = false;
+    bool manual_size_ = false;
+
+    KitsuContextMenu* menu_ = nullptr;
+
+    // Caché
+    SDL_Texture* text_texture_ = nullptr;
+    int tex_w_ = 0, tex_h_ = 0;
+    std::string cached_text_;
+    TTF_Font* cached_font_ = nullptr;
+    Uint8 cached_r_ = 0, cached_g_ = 0, cached_b_ = 0;
+
+    TTF_Font* activeFont() const;
+    void destroyTexture();
     void updateTextTexture(SDL_Renderer* renderer, Color color);
-    void destroyTextTexture();
+
+    // Reconstruye el menú contextual desde items_
+    void rebuildMenu();
 };
 
 } // namespace KitsuGui

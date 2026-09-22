@@ -1,281 +1,326 @@
 #include "kitsugui/progress_bar.h"
-#include "kitsugui/widget.h"
+#include "kitsugui/fonts.h"
+#include "kitsugui/shapes.h"
+#include "kitsugui/theme.h"
+#include "internal.h"
 #include <cstdio>
-#include <cmath>
+#include <algorithm>
 
 namespace KitsuGui {
 
-TTF_Font* KitsuProgressBar::g_font = nullptr;
-
+// ============================================================
+// Constructor / destructor
+// ============================================================
 KitsuProgressBar::KitsuProgressBar() {
+    desired_w = 250;
+    desired_h = 24;
     bounds = {0, 0, 250, 24};
-    requested_w = 250;
-    requested_h = 24;
-    last_update = SDL_GetTicks();
+    last_update_ = SDL_GetTicks();
 }
 
 KitsuProgressBar::~KitsuProgressBar() {
-    destroyTextTexture();
-    if (mode == ProgressMode::INDETERMINATE) {
+    destroyTexture();
+    if (mode_ == ProgressMode::INDETERMINATE) {
         g_active_animations--;
         if (g_active_animations < 0) g_active_animations = 0;
     }
 }
 
-void KitsuProgressBar::destroyTextTexture() {
-    if (text_texture) {
-        SDL_DestroyTexture(text_texture);
-        text_texture = nullptr;
-        tex_w = tex_h = 0;
+// ============================================================
+// Valor
+// ============================================================
+KitsuProgressBar* KitsuProgressBar::value(float v) {
+    if (v < 0.0f) v = 0.0f;
+    if (v > 1.0f) v = 1.0f;
+    if (value_ != v) {
+        value_ = v;
+        invalidate();
     }
+    return this;
 }
 
-// ===== CONFIGURACIÓN FLUIDA =====
-KitsuProgressBar& KitsuProgressBar::withMode(ProgressMode m) {
-    if (mode == m) return *this;
-    
+KitsuProgressBar* KitsuProgressBar::value(float v, float max) {
+    if (max > 0.0f) value(v / max);
+    return this;
+}
+
+// ============================================================
+// Modo
+// ============================================================
+KitsuProgressBar* KitsuProgressBar::mode(ProgressMode m) {
+    if (mode_ == m) return this;
+
     // Actualizar contador global
-    if (mode == ProgressMode::INDETERMINATE) {
+    if (mode_ == ProgressMode::INDETERMINATE) {
         g_active_animations--;
         if (g_active_animations < 0) g_active_animations = 0;
     }
     if (m == ProgressMode::INDETERMINATE) {
         g_active_animations++;
-        anim_phase = 0.0f;
-        last_update = SDL_GetTicks();
+        anim_phase_ = 0.0f;
+        last_update_ = SDL_GetTicks();
     }
-    
-    mode = m;
-    markDirty();
-    return *this;
+
+    mode_ = m;
+    invalidate();
+    return this;
 }
 
-KitsuProgressBar& KitsuProgressBar::withValue(float v) {
-    setValue(v);
-    return *this;
+KitsuProgressBar* KitsuProgressBar::indeterminate() {
+    return mode(ProgressMode::INDETERMINATE);
 }
 
-KitsuProgressBar& KitsuProgressBar::withValue(float v, float max) {
-    if (max > 0) setValue(v / max);
-    return *this;
+// ============================================================
+// Apariencia
+// ============================================================
+KitsuProgressBar* KitsuProgressBar::textPosition(ProgressTextPosition p) {
+    text_position_ = p;
+    invalidate();
+    return this;
 }
 
-KitsuProgressBar& KitsuProgressBar::withTextPosition(ProgressTextPosition p) {
-    text_position = p;
-    markDirty();
-    return *this;
+KitsuProgressBar* KitsuProgressBar::showText(bool show) {
+    text_position_ = show ? ProgressTextPosition::INSIDE
+                          : ProgressTextPosition::NONE;
+    invalidate();
+    return this;
 }
 
-KitsuProgressBar& KitsuProgressBar::withTextColor(const Color& c) {
-    text_color = c;
-    markDirty();
-    return *this;
+KitsuProgressBar* KitsuProgressBar::suffix(const std::string& s) {
+    suffix_ = s;
+    invalidate();
+    return this;
 }
 
-KitsuProgressBar& KitsuProgressBar::withFillTextColor(const Color& c) {
-    fill_text_color = c;
-    markDirty();
-    return *this;
+KitsuProgressBar* KitsuProgressBar::colors(const Color& filled,
+                                          const Color& empty) {
+    track_filled_ = filled;
+    track_empty_  = empty;
+    invalidate();
+    return this;
 }
 
-KitsuProgressBar& KitsuProgressBar::withTrackColors(const Color& filled, const Color& empty) {
-    track_filled = filled;
-    track_empty = empty;
-    markDirty();
-    return *this;
+KitsuProgressBar* KitsuProgressBar::textColor(const Color& c) {
+    text_color_ = c;
+    invalidate();
+    return this;
 }
 
-KitsuProgressBar& KitsuProgressBar::withFont(TTF_Font* f) {
-    font = f;
-    markDirty();
-    return *this;
+KitsuProgressBar* KitsuProgressBar::fillTextColor(const Color& c) {
+    fill_text_color_ = c;
+    invalidate();
+    return this;
 }
 
-KitsuProgressBar& KitsuProgressBar::withHeight(int h) {
+KitsuProgressBar* KitsuProgressBar::font(TTF_Font* f) {
+    font_ = f;
+    invalidate();
+    return this;
+}
+
+KitsuProgressBar* KitsuProgressBar::height(int h) {
+    desired_h = h;
     bounds.h = h;
-    requested_h = h;
-    markDirty();
-    return *this;
+    manual_size_ = true;
+    invalidate();
+    return this;
 }
 
-KitsuProgressBar& KitsuProgressBar::setBounds(int x, int y, int w, int h) {
-    setBoundsInternal(x, y, w, h);
-    return *this;
+KitsuProgressBar* KitsuProgressBar::size(int w, int h) {
+    desired_w = w;
+    desired_h = h;
+    bounds.w = w;
+    bounds.h = h;
+    manual_size_ = true;
+    invalidate();
+    return this;
 }
 
-// ===== VALOR =====
-void KitsuProgressBar::setValue(float v) {
-    if (v < 0.0f) v = 0.0f;
-    if (v > 1.0f) v = 1.0f;
-    
-    if (value != v) {
-        value = v;
-        markDirty();
-    }
+// ============================================================
+// Helpers internos
+// ============================================================
+TTF_Font* KitsuProgressBar::activeFont() const {
+    return font_ ? font_ : KitsuFonts::normal();
 }
 
-// ===== TICK (llamado cada frame por run.cpp) =====
-void KitsuProgressBar::tick() {
-    if (mode != ProgressMode::INDETERMINATE) return;
-    
-    Uint32 now = SDL_GetTicks();
-    Uint32 elapsed = now - last_update;
-    last_update = now;
-    
-    // Avanza el phase
-    anim_phase += (float)elapsed * 0.0008f;   // ~0.8 por segundo
-    while (anim_phase > 1.0f) anim_phase -= 1.0f;
-    
-    // Marca dirty para forzar redibujado
-    markDirty();
-}
-
-// ===== CONSTRUIR EL TEXTO =====
 std::string KitsuProgressBar::buildText() const {
-    if (text_position == ProgressTextPosition::NONE) return "";
-    if (mode == ProgressMode::INDETERMINATE) return "";
-    
-    char buf[32];
-    snprintf(buf, sizeof(buf), "%.0f%%", value * 100.0f);
+    if (text_position_ == ProgressTextPosition::NONE) return "";
+    if (mode_ == ProgressMode::INDETERMINATE) return "";
+
+    char buf[64];
+    snprintf(buf, sizeof(buf), "%.0f%%", value_ * 100.0f);
     return buf;
 }
 
-// ===== TEXTURA DEL TEXTO =====
-void KitsuProgressBar::updateTextTexture(SDL_Renderer* renderer, Uint8 r, Uint8 g, Uint8 b) {
-    TTF_Font* active = getActiveFont();
-    if (!active) return;
-    
-    std::string text = buildText();
-    if (text.empty()) {
-        destroyTextTexture();
-        return;
+void KitsuProgressBar::destroyTexture() {
+    if (text_texture_) {
+        SDL_DestroyTexture(text_texture_);
+        text_texture_ = nullptr;
+        tex_w_ = tex_h_ = 0;
     }
-    
-    if (text_texture &&
-        cached_text == text &&
-        cached_r == r && cached_g == g && cached_b == b) {
-        return;
-    }
-    
-    destroyTextTexture();
-    
-    SDL_Color fg = { r, g, b, 255 };
-    SDL_Surface* surface = TTF_RenderUTF8_Blended(active, text.c_str(), fg);
-    if (!surface) return;
-    
-    text_texture = SDL_CreateTextureFromSurface(renderer, surface);
-    tex_w = surface->w;
-    tex_h = surface->h;
-    SDL_FreeSurface(surface);
-    
-    cached_text = text;
-    cached_r = r; cached_g = g; cached_b = b;
 }
 
-// ===== RENDER =====
+void KitsuProgressBar::updateTextTexture(SDL_Renderer* renderer, Color color) {
+    TTF_Font* active = activeFont();
+    if (!active || !renderer) return;
+
+    std::string txt = buildText();
+    if (txt.empty()) {
+        destroyTexture();
+        return;
+    }
+
+    Uint8 r = (Uint8)color.r;
+    Uint8 g = (Uint8)color.g;
+    Uint8 b = (Uint8)color.b;
+
+    if (text_texture_ &&
+        cached_text_ == txt &&
+        cached_r_ == r && cached_g_ == g && cached_b_ == b) {
+        return;
+    }
+
+    destroyTexture();
+
+    SDL_Color fg = { r, g, b, 255 };
+    SDL_Surface* surface = TTF_RenderUTF8_Blended(active, txt.c_str(), fg);
+    if (!surface) return;
+
+    text_texture_ = SDL_CreateTextureFromSurface(renderer, surface);
+    tex_w_ = surface->w;
+    tex_h_ = surface->h;
+    SDL_FreeSurface(surface);
+
+    cached_text_ = txt;
+    cached_r_ = r;
+    cached_g_ = g;
+    cached_b_ = b;
+}
+
+// ============================================================
+// Tick
+// ============================================================
+void KitsuProgressBar::tick() {
+    if (mode_ != ProgressMode::INDETERMINATE) return;
+
+    Uint32 now = SDL_GetTicks();
+    Uint32 elapsed = now - last_update_;
+    last_update_ = now;
+
+    anim_phase_ += (float)elapsed * 0.0008f;
+    while (anim_phase_ > 1.0f) anim_phase_ -= 1.0f;
+
+    invalidate();
+}
+
+// ============================================================
+// Render
+// ============================================================
 void KitsuProgressBar::render(SDL_Renderer* renderer) {
     if (!visible || !renderer) return;
-    
-    SDL_Rect abs = getRenderBounds();
-    
-    // Track vacío (fondo)
-    SDL_SetRenderDrawColor(renderer,
-        (Uint8)track_empty.r, (Uint8)track_empty.g, (Uint8)track_empty.b, 255);
-    SDL_RenderFillRect(renderer, &abs);
-    
-    // Calcular rect del fill
-    SDL_Rect fill = abs;
-    
-    if (mode == ProgressMode::DETERMINATE) {
-        fill.w = (int)(abs.w * value);
+
+    SDL_Rect r = visualRect();
+    KitsuTheme& t = KitsuTheme::active();
+
+    // Resolver colores
+    Color filled_c = (track_filled_.r < 0) ? t.accent       : track_filled_;
+    Color empty_c  = (track_empty_.r  < 0) ? t.bg_tertiary  : track_empty_;
+    Color tclr     = (text_color_.r   < 0) ? t.text_secondary : text_color_;
+    Color ftclr    = (fill_text_color_.r < 0) ? t.text_on_accent : fill_text_color_;
+
+    // ===== 1. Track vacío =====
+    KitsuRect((float)r.x, (float)r.y, (float)r.w, (float)r.h)
+        .radius(t.radius_progress_bar)
+        .fill(empty_c)
+        .draw(renderer);
+
+    // ===== 2. Calcular rect del fill =====
+    SDL_Rect fill = r;
+
+    if (mode_ == ProgressMode::DETERMINATE) {
+        fill.w = (int)(r.w * value_);
     } else {
-        // Ventana deslizante del 40% del ancho
+        // Ventana deslizante del 40%
         const float window_size = 0.4f;
-        float phase = anim_phase;
-        
-        int win_w = (int)(abs.w * window_size);
-        int pos_x = (int)(abs.w * (phase * (1.0f + window_size)) - win_w);
-        
-        fill.x = abs.x + pos_x;
+        int win_w = (int)(r.w * window_size);
+        int pos_x = (int)(r.w * (anim_phase_ * (1.0f + window_size)) - win_w);
+
+        fill.x = r.x + pos_x;
         fill.w = win_w;
-        
-        // Clippear al track
-        if (fill.x < abs.x) {
-            fill.w -= (abs.x - fill.x);
-            fill.x = abs.x;
+
+        if (fill.x < r.x) {
+            fill.w -= (r.x - fill.x);
+            fill.x = r.x;
         }
-        if (fill.x + fill.w > abs.x + abs.w) {
-            fill.w = abs.x + abs.w - fill.x;
+        if (fill.x + fill.w > r.x + r.w) {
+            fill.w = r.x + r.w - fill.x;
         }
     }
-    
-    // Dibujar fill
+
+    // ===== 3. Fill =====
     if (fill.w > 0) {
-        SDL_SetRenderDrawColor(renderer,
-            (Uint8)track_filled.r, (Uint8)track_filled.g, (Uint8)track_filled.b, 255);
-        SDL_RenderFillRect(renderer, &fill);
+        KitsuRect((float)fill.x, (float)fill.y,
+                  (float)fill.w, (float)fill.h)
+            .radius(t.radius_progress_bar)
+            .fill(filled_c)
+            .draw(renderer);
     }
-    
-    // Texto (solo en modo DETERMINATE)
-    if (mode == ProgressMode::DETERMINATE &&
-        text_position == ProgressTextPosition::INSIDE) {
-        std::string text = buildText();
-        if (!text.empty()) {
-            // Primero gris (sobre track vacío)
-            updateTextTexture(renderer,
-                (Uint8)text_color.r, (Uint8)text_color.g, (Uint8)text_color.b);
-            
-            if (text_texture) {
-                SDL_Rect text_rect = {
-                    abs.x + (abs.w - tex_w) / 2,
-                    abs.y + (abs.h - tex_h) / 2,
-                    tex_w, tex_h
-                };
-                SDL_RenderCopy(renderer, text_texture, nullptr, &text_rect);
-                
-                // Luego blanco (sobre fill), con clipping
-                if (fill.w > 0) {
-                    SDL_RenderSetClipRect(renderer, &fill);
-                    
-                    destroyTextTexture();
-                    updateTextTexture(renderer,
-                        (Uint8)fill_text_color.r, (Uint8)fill_text_color.g, (Uint8)fill_text_color.b);
-                    
-                    if (text_texture) {
-                        SDL_RenderCopy(renderer, text_texture, nullptr, &text_rect);
-                    }
-                    
-                    SDL_RenderSetClipRect(renderer, nullptr);
+
+    // ===== 4. Texto (solo DETERMINATE) =====
+    if (mode_ != ProgressMode::DETERMINATE) {
+        clearNeedsRender();
+        return;
+    }
+
+    if (text_position_ == ProgressTextPosition::INSIDE) {
+        // Texto "fantasma" gris
+        updateTextTexture(renderer, tclr);
+        if (text_texture_) {
+            SDL_Rect text_rect = {
+                r.x + (r.w - tex_w_) / 2,
+                r.y + (r.h - tex_h_) / 2,
+                tex_w_, tex_h_
+            };
+            SDL_RenderCopy(renderer, text_texture_, nullptr, &text_rect);
+
+            // Texto encima del fill con clipping
+            if (fill.w > 0) {
+                SDL_RenderSetClipRect(renderer, &fill);
+                destroyTexture();
+                updateTextTexture(renderer, ftclr);
+                if (text_texture_) {
+                    SDL_RenderCopy(renderer, text_texture_, nullptr, &text_rect);
                 }
+                SDL_RenderSetClipRect(renderer, nullptr);
             }
         }
     }
-    else if (mode == ProgressMode::DETERMINATE &&
-             text_position != ProgressTextPosition::NONE &&
-             text_position != ProgressTextPosition::INSIDE) {
-        updateTextTexture(renderer,
-            (Uint8)text_color.r, (Uint8)text_color.g, (Uint8)text_color.b);
-        
-        if (text_texture) {
+    else if (text_position_ != ProgressTextPosition::NONE) {
+        updateTextTexture(renderer, tclr);
+        if (text_texture_) {
             SDL_Rect text_rect;
-            switch (text_position) {
+            switch (text_position_) {
                 case ProgressTextPosition::ABOVE:
-                    text_rect = { abs.x + (abs.w - tex_w) / 2, abs.y - tex_h - 2, tex_w, tex_h };
+                    text_rect = { r.x + (r.w - tex_w_) / 2,
+                                  r.y - tex_h_ - 2, tex_w_, tex_h_ };
                     break;
                 case ProgressTextPosition::BELOW:
-                    text_rect = { abs.x + (abs.w - tex_w) / 2, abs.y + abs.h + 2, tex_w, tex_h };
+                    text_rect = { r.x + (r.w - tex_w_) / 2,
+                                  r.y + r.h + 2, tex_w_, tex_h_ };
                     break;
                 case ProgressTextPosition::RIGHT:
-                    text_rect = { abs.x + abs.w + 8, abs.y + (abs.h - tex_h) / 2, tex_w, tex_h };
+                    text_rect = { r.x + r.w + 8,
+                                  r.y + (r.h - tex_h_) / 2,
+                                  tex_w_, tex_h_ };
                     break;
                 default:
                     text_rect = { 0, 0, 0, 0 };
             }
-            SDL_RenderCopy(renderer, text_texture, nullptr, &text_rect);
+            SDL_RenderCopy(renderer, text_texture_, nullptr, &text_rect);
         }
     }
-    
-    clearDirty();
+
+    clearNeedsRender();
 }
 
 } // namespace KitsuGui

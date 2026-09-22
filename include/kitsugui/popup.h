@@ -10,105 +10,114 @@
 
 namespace KitsuGui {
 
-// ===== Tipos de popup =====
 enum class PopupType {
-    MESSAGE,      // Solo mensaje + OK
-    CONFIRM,      // Mensaje + Sí/No
-    INPUT,        // Mensaje + campo texto + OK/Cancel
-    WARNING,      // Icono advertencia + mensaje + OK
-    ERROR,        // Icono error + mensaje + OK
-    INFO,         // Icono info + mensaje + OK
-    SUCCESS,      // Icono éxito + mensaje + OK
-    CUSTOM        // El usuario añade sus widgets
+    MESSAGE,
+    CONFIRM,
+    INPUT,
+    WARNING,
+    ERROR,
+    INFO,
+    SUCCESS,
+    CUSTOM
 };
 
+// ============================================================
+// KitsuPopup
+// ============================================================
+// Uso simple (helpers):
+//   Popup::message("Hola", "Esto es un mensaje");
+//   Popup::confirm("¿?", "¿Continuar?", [](bool ok) { ... });
+//
+// Uso custom:
+//   auto* p = new KitsuPopup(400, 200, "Título");
+//   p->modal(true)->type(PopupType::MESSAGE);
+//   p->add(new KitsuLabel("Contenido"));
+//   p->addButton("OK", [p]() { p->close(); });
+//
+// Los métodos fluent devuelven KitsuPopup* (puntero a this),
+// para poder encadenar siempre con '->'.
+// ============================================================
 class KitsuPopup {
 public:
     KitsuPopup(int width, int height, const std::string& title);
     ~KitsuPopup();
-    
-    // ===== Configuración fluida =====
-    KitsuPopup& withType(PopupType t);
-    KitsuPopup& withMessage(const std::string& msg);
-    KitsuPopup& withModal(bool modal);
-    KitsuPopup& withResizable(bool resizable);
-    KitsuPopup& withCloseOnEscape(bool enabled);
-    
+
+    // ===== Configuración fluent =====
+    KitsuPopup* type(PopupType t);
+    KitsuPopup* message(const std::string& msg);
+    KitsuPopup* modal(bool m);
+    KitsuPopup* resizable(bool r);
+    KitsuPopup* closeOnEscape(bool enabled);
+
     // ===== Widgets =====
-    void add(KitsuWidget* widget);
-    void addButton(const std::string& text, std::function<void()> cb);
-    void addLabel(const std::string& text);
-    
+    KitsuPopup* add(KitsuWidget* widget);
+    KitsuPopup* addButton(const std::string& text, std::function<void()> cb);
+    KitsuPopup* addLabel(const std::string& text);
+
     // ===== Ciclo de vida =====
-    void show();
-    void hide();
-    void close();
-    bool isOpen() const { return open; }
-    
-    // ===== Render y eventos =====
+    KitsuPopup* show();
+    KitsuPopup* hide();
+    KitsuPopup* close();
+
+    // ===== Callbacks =====
+    KitsuPopup* onClose(std::function<void()> cb);
+    KitsuPopup* onResult(std::function<void(int)> cb);
+
+    // ===== Estado (no fluent) =====
+    bool isOpen() const { return open_; }
+    bool isModal() const { return modal_; }
+
+    // ===== Acceso (no fluent) =====
+    SDL_Window*    sdlWindow()   const { return window_; }
+    Uint32         windowId()    const { return window_id_; }
+    KitsuBox*      root()        const { return root_; }
+
+    // ===== Render y eventos (no fluent) =====
     void render();
     void handleEvent(const SDL_Event& e);
     void tick();
     void updateLayout();
-    void markAllDirty();
-    
-    // ===== Callbacks =====
-    void setOnClose(std::function<void()> cb) { on_close = cb; }
-    void setOnResult(std::function<void(int)> cb) { on_result = cb; }
-    
-    // ===== Estado =====
-    bool isModal() const { return modal; }
-    
-    // ===== Acceso =====
-    SDL_Window* getSDLWindow() const { return window; }
-    Uint32 getWindowID() const { return window_id; }
-    KitsuBox* getRoot() const { return root; }
-    
+
 private:
-    SDL_Window* window = nullptr;
-    SDL_Renderer* renderer = nullptr;
-    KitsuRenderer* kitsu_renderer = nullptr;
-    KitsuBox* root = nullptr;
-    
-    Uint32 window_id = 0;
-    bool open = false;
-    bool modal = false;
-    bool close_on_escape = true;
-    PopupType type = PopupType::MESSAGE;
-    
-    int width = 0;
-    int height = 0;
-    
-    std::vector<KitsuWidget*> owned_widgets;
-    std::function<void()> on_close;
-    std::function<void(int)> on_result;
+    SDL_Window*    window_    = nullptr;
+    SDL_Renderer*  renderer_  = nullptr;
+    KitsuRenderer* krenderer_ = nullptr;
+    KitsuBox*      root_      = nullptr;
+
+    Uint32 window_id_ = 0;
+    bool open_ = false;
+    bool modal_ = false;
+    bool close_on_escape_ = true;
+    PopupType type_ = PopupType::MESSAGE;
+
+    int width_ = 0;
+    int height_ = 0;
+
+    std::vector<KitsuWidget*> owned_widgets_;
+    std::function<void()> on_close_;
+    std::function<void(int)> on_result_;
 };
 
 // ============================================================
-// Helpers para popups comunes
+// Helpers
 // ============================================================
 namespace Popup {
-    // Básicos
     KitsuPopup* message(const std::string& title, const std::string& msg);
-    
     KitsuPopup* confirm(const std::string& title, const std::string& msg,
                        std::function<void(bool)> cb);
-    
     KitsuPopup* input(const std::string& title, const std::string& msg,
                      std::function<void(const std::string&)> cb);
-    
-    // Con icono del tema del sistema
     KitsuPopup* warning(const std::string& title, const std::string& msg);
     KitsuPopup* error(const std::string& title, const std::string& msg);
     KitsuPopup* info(const std::string& title, const std::string& msg);
     KitsuPopup* success(const std::string& title, const std::string& msg);
 }
 
-// ===== Lista global de popups activos =====
+// Lista global de popups activos
 extern std::vector<KitsuPopup*> g_popups;
 
-// ===== Devuelve el primer modal activo (o nullptr) =====
-KitsuPopup* getActiveModal();
+// Primer modal activo (o nullptr)
+KitsuPopup* activeModal();
 
 } // namespace KitsuGui
 

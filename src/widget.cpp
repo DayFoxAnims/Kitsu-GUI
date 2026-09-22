@@ -6,70 +6,65 @@ namespace KitsuGui {
 int g_active_animations = 0;
 int g_always_render = 0;
 
-void KitsuWidget::markDirty() {
+// ============================================================
+// Invalidación
+// ============================================================
+void KitsuWidget::invalidate() {
     dirty_ = true;
     if (g_renderer) {
-        SDL_Rect abs = getRenderBounds();
-        g_renderer->markDirty(abs.x, abs.y, abs.w, abs.h);
+        g_renderer->invalidate();
     }
 }
 
-SDL_Rect KitsuWidget::getAbsoluteBounds() const {
-    SDL_Rect abs = bounds;
+// ============================================================
+// Rectángulos
+// ============================================================
+// globalRect() incluye el transform de los padres.
+// Esto hace que el hit-test respete el scroll automáticamente
+// (bug #7 resuelto de raíz).
+// ============================================================
+SDL_Rect KitsuWidget::globalRect() const {
+    SDL_Rect r = bounds;
     const KitsuWidget* p = parent;
     while (p) {
-        abs.x += p->bounds.x;
-        abs.y += p->bounds.y;
+        r.x += p->bounds.x + p->transform.offset_x;
+        r.y += p->bounds.y + p->transform.offset_y;
         p = p->parent;
     }
-    return abs;
+    return r;
 }
 
-SDL_Rect KitsuWidget::getRenderBounds() const {
-    SDL_Rect abs = bounds;
-    const KitsuWidget* p = parent;
-    while (p) {
-        abs.x += p->bounds.x + p->render_offset_x;
-        abs.y += p->bounds.y + p->render_offset_y;
-        p = p->parent;
-    }
-    return abs;
+// visualRect() es un alias conceptual por ahora.
+// En el futuro: si añadimos rotación/escala, globalRect() NO
+// las incluiría (para hit-test AABB), y visualRect() sí.
+SDL_Rect KitsuWidget::visualRect() const {
+    return globalRect();
 }
 
 bool KitsuWidget::contains(int x, int y) const {
-    SDL_Rect abs = getAbsoluteBounds();
-    return (x >= abs.x && x < abs.x + abs.w &&
-            y >= abs.y && y < abs.y + abs.h);
+    SDL_Rect r = globalRect();
+    return (x >= r.x && x < r.x + r.w &&
+            y >= r.y && y < r.y + r.h);
 }
 
 // ============================================================
-// checkRightClick
+// Menú contextual
 // ============================================================
-// Devuelve true si el evento es un click derecho dentro del widget
-// Y hay callback configurado. Llama al callback con coordenadas absolutas.
-bool KitsuWidget::checkRightClick(const SDL_Event& e) {
-    // ¿Es un click derecho?
+bool KitsuWidget::tryContextMenu(const SDL_Event& e) {
     if (e.type != SDL_MOUSEBUTTONDOWN) return false;
     if (e.button.button != SDL_BUTTON_RIGHT) return false;
-    
-    // ¿Hay callback?
-    if (!on_right_click) return false;
-    
-    // ¿Está visible y enabled?
+    if (!onContextMenu) return false;
     if (!visible || !enabled) return false;
-    
-    // ¿El click está dentro?
-    SDL_Rect abs = getAbsoluteBounds();
+
+    SDL_Rect r = globalRect();
     int mx = e.button.x;
     int my = e.button.y;
-    bool inside = (mx >= abs.x && mx < abs.x + abs.w &&
-                   my >= abs.y && my < abs.y + abs.h);
-    
-    if (inside) {
-        on_right_click(mx, my);
+
+    if (mx >= r.x && mx < r.x + r.w &&
+        my >= r.y && my < r.y + r.h) {
+        onContextMenu(mx, my);
         return true;
     }
-    
     return false;
 }
 

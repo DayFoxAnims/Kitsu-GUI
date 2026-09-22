@@ -2,7 +2,7 @@
 #define KITSUGUI_SLIDER_H
 
 #include "kitsugui/widget.h"
-#include "kitsugui/theme.h"
+#include "kitsugui/color.h"
 #include <SDL2/SDL_ttf.h>
 #include <string>
 #include <functional>
@@ -14,69 +14,94 @@ enum class SliderOrientation {
     VERTICAL
 };
 
+// ============================================================
+// KitsuSlider
+// ============================================================
+// Uso mínimo:
+//   auto* s = new KitsuSlider(0, 100, 50);
+//   s->onChange([](float v) { ... });
+//
+// Con valores default (0..100, valor 0):
+//   auto* s = new KitsuSlider();
+//
+// Formato del número:
+//   s->suffix("%").decimals(1).showNumber(true);
+// ============================================================
 class KitsuSlider : public KitsuWidget {
 public:
-    KitsuSlider(float min = 0.0f, float max = 100.0f, float value = 0.0f);
+    explicit KitsuSlider(float min = 0.0f,
+                        float max = 100.0f,
+                        float value = 0.0f);
     ~KitsuSlider() override;
-    
-    KitsuSlider& withOrientation(SliderOrientation o);
-    KitsuSlider& withValue(float v);
-    KitsuSlider& withRange(float min, float max);
-    KitsuSlider& withStep(float s);
-    KitsuSlider& withShowNumber(bool show);
-    KitsuSlider& withNumberSuffix(const std::string& suffix);
-    KitsuSlider& withDecimals(int d);
-    KitsuSlider& withFont(TTF_Font* font);
-    KitsuSlider& withCallback(std::function<void(float)> cb);
-    KitsuSlider& disabled();
-    KitsuSlider& setBounds(int x, int y, int w, int h) {
-        setBoundsInternal(x, y, w, h);
-        return *this;
+
+    // ===== Valor =====
+    float value() const { return value_; }
+    KitsuSlider* value(float v);
+
+    float min() const { return min_; }
+    float max() const { return max_; }
+    KitsuSlider* range(float min, float max);
+    KitsuSlider* step(float s);
+
+    // ===== Apariencia =====
+    KitsuSlider* orientation(SliderOrientation o);
+    KitsuSlider* showNumber(bool show);
+    KitsuSlider* suffix(const std::string& s);
+    KitsuSlider* decimals(int d);
+    KitsuSlider* font(TTF_Font* f);
+    KitsuSlider* size(int w, int h);
+    KitsuSlider* disable();
+
+    // ===== Callbacks =====
+    KitsuSlider* onChange(std::function<void(float)> cb) {
+        on_change_ = std::move(cb);
+        return this;
     }
-    
-    float getValue() const { return value; }
-    void setValue(float v);
-    
+
+    // ===== Overrides =====
     void render(SDL_Renderer* renderer) override;
     bool handleEvent(const SDL_Event& e) override;
-    
-    static void setFont(TTF_Font* font) { g_font = font; }
-    static TTF_Font* getFont() { return g_font; }
-    
+
 private:
-    float min_value = 0.0f;
-    float max_value = 100.0f;
-    float value = 0.0f;
-    float step = 0.0f;
-    bool show_number = true;
-    bool mouse_inside = false;
-    bool dragging = false;
-    bool enabled_ = true;
-    SliderOrientation orientation = SliderOrientation::HORIZONTAL;
-    
-    std::string number_suffix = "";
-    int decimals = 0;
-    
-    TTF_Font* font = nullptr;
-    std::function<void(float)> callback;
-    
+    float min_ = 0.0f;
+    float max_ = 100.0f;
+    float value_ = 0.0f;
+    float step_ = 0.0f;
+
+    SliderOrientation orientation_ = SliderOrientation::HORIZONTAL;
+    bool show_number_ = true;
+    bool mouse_inside_ = false;
+    bool dragging_ = false;
+    bool disabled_ = false;
+    bool manual_size_ = false;
+
+    std::string suffix_;
+    int decimals_ = 0;
+
+    TTF_Font* font_ = nullptr;
+    std::function<void(float)> on_change_;
+
     // Caché del número
-    SDL_Texture* number_texture = nullptr;
-    int num_w = 0, num_h = 0;
-    std::string cached_number;
-    Uint8 cached_r = 0, cached_g = 0, cached_b = 0;
-    
-    static TTF_Font* g_font;
-    
-    TTF_Font* getActiveFont() const { return font ? font : g_font; }
-    void updateNumberTexture(SDL_Renderer* renderer);
+    SDL_Texture* number_texture_ = nullptr;
+    int num_w_ = 0, num_h_ = 0;
+    std::string cached_number_;
+    Uint8 cached_r_ = 0, cached_g_ = 0, cached_b_ = 0;
+
+    TTF_Font* activeFont() const;
     void destroyNumberTexture();
-    
-    int getKnobPosition(int track_x, int track_y, int track_w, int track_h, int knob_size) const;
-    float getValueFromPosition(int mx, int my, int track_x, int track_y, int track_w, int track_h, int knob_size) const;
-    SDL_Rect getTrackRect(int abs_x, int abs_y, int abs_w, int abs_h, int num_w) const;
+    void updateNumberTexture(SDL_Renderer* renderer, Color color);
+    void autoSize();
+
+    SDL_Rect trackRect(int abs_x, int abs_y, int abs_w, int abs_h,
+                      int num_w) const;
+    int knobPosition(int track_x, int track_y,
+                     int track_w, int track_h, int knob_size) const;
+    float valueFromPos(int mx, int my,
+                      int track_x, int track_y,
+                      int track_w, int track_h, int knob_size) const;
 };
 
 } // namespace KitsuGui
 
 #endif
+	

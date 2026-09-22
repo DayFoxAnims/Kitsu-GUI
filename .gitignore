@@ -41,3 +41,4 @@ kitsu_icon_*.png
 # ===== Local configs =====
 *.local
 config.local.*
+repomix.config.json
